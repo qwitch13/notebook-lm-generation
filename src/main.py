@@ -234,13 +234,27 @@ class NotebookLMGenerator:
                 ProcessingStep.VIDEO_GENERATION,
                 f"Generating video for: {topic.title}"
             )
+            video_ok = False
             try:
                 if self.notebooklm:
                     self.notebooklm.create_notebook(topic.title)
-                    self.notebooklm.add_text_source(topic.content, topic.title)
-                    self.notebooklm.generate_audio_overview()
+                    src_ok = self.notebooklm.add_text_source(topic.content, topic.title)
+                    if src_ok:
+                        gen_ok = self.notebooklm.generate_audio_overview()
+                        video_ok = bool(gen_ok)
+                    else:
+                        self.logger.warning("Add source step did not complete successfully; skipping audio generation")
             except Exception as e:
                 self.logger.warning(f"Video generation failed for {topic.title}: {e}")
+                video_ok = False
+
+            if video_ok:
+                self.progress.complete_step(ProcessingStep.VIDEO_GENERATION)
+            else:
+                self.progress.fail_step(
+                    ProcessingStep.VIDEO_GENERATION,
+                    "Notebook creation/source addition/audio generation did not complete; manual action may be required"
+                )
 
             # Handouts
             self.progress.set_step(

@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.live import Live
+from rich.panel import Panel
+from rich.align import Align
 
 from ..config.settings import ProcessingStep
 
@@ -51,6 +53,7 @@ class ProgressReporter:
         self._is_running = False
         self._update_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._live: Optional[Live] = None
 
         # Initialize all steps
         for step in ProcessingStep.ORDERED_STEPS:
@@ -65,14 +68,26 @@ class ProgressReporter:
         self._update_thread = threading.Thread(target=self._update_loop, daemon=True)
         self._update_thread.start()
 
-        self.console.print("\n[bold green]Starting NotebookLM Generation Process[/bold green]\n")
+        # Start live rendering to avoid console spam
+        try:
+            self._live = Live(self._render(), console=self.console, refresh_per_second=8)
+            self._live.start()
+        except Exception:
+            # Fallback: simple print if Live fails
+            self.console.print("\n[bold green]Starting NotebookLM Generation Process[/bold green]\n")
 
     def stop(self):
         """Stop the progress reporter."""
         self._is_running = False
         if self._update_thread:
             self._update_thread.join(timeout=2)
-
+        # Stop live rendering before final summary
+        if self._live:
+            try:
+                self._live.stop()
+            except Exception:
+                pass
+            self._live = None
         self._print_final_summary()
 
     def set_step(self, step: str, message: str = ""):
@@ -160,11 +175,28 @@ class ProgressReporter:
             time.sleep(self.update_interval)
 
     def _print_progress(self):
-        """Print current progress to console."""
+        """Update current progress in-place using Live to avoid spam."""
         progress = self.get_progress()
+        renderable = self._render(progress)
+        if self._live:
+            try:
+                self._live.update(renderable, refresh=True)
+            except Exception:
+                # If Live update fails, fall back to printing once
+                self.console.print(renderable)
+        else:
+            # Live not available, simple print
+            self.console.print(renderable)
 
-        # Create progress table
-        table = Table(title="Progress Update", show_header=True, header_style="bold cyan")
+        # Callback if provided
+        if self.on_update:
+            self.on_update(progress)
+
+    def _render(self, progress: Optional[dict] = None):
+        """Build a rich renderable (table + summary) for current progress."""
+        progress = progress or self.get_progress()
+
+        table = Table(show_header=True, header_style="bold cyan")
         table.add_column("Step", style="dim")
         table.add_column("Status")
         table.add_column("Details")
@@ -178,38 +210,40 @@ class ProgressReporter:
 
         for step_name in ProcessingStep.ORDERED_STEPS:
             status = self._steps.get(step_name)
-            if status:
-                icon = status_icons.get(status.status, "○")
-                status_text = status.status.replace("_", " ").title()
+            if not status:
+                continue
+            icon = status_icons.get(status.status, "○")
+            status_text = status.status.replace("_", " ").title()
 
-                # Add sub-step progress if available
-                details = status.message
-                if status.sub_steps and status.status == "in_progress":
-                    details = f"{status.current_sub_step}/{len(status.sub_steps)} - {details}"
+            details = status.message
+            if status.sub_steps and status.status == "in_progress":
+                details = f"{status.current_sub_step}/{len(status.sub_steps)} - {details}"
 
-                table.add_row(
-                    step_name.replace("_", " ").title(),
-                    f"{icon} {status_text}",
-                    details[:50] + "..." if len(details) > 50 else details
-                )
+            table.add_row(
+                step_name.replace("_", " ").title(),
+                f"{icon} {status_text}",
+                details[:80] + "..." if len(details) > 80 else details
+            )
 
-        self.console.print(table)
-
-        # Print summary line
+        # Summary footer
         elapsed_str = ""
         if progress["elapsed_seconds"]:
             minutes = int(progress["elapsed_seconds"] // 60)
             seconds = int(progress["elapsed_seconds"] % 60)
-            elapsed_str = f" | Elapsed: {minutes}m {seconds}s"
+            elapsed_str = f"Elapsed: {minutes}m {seconds}s"
 
-        self.console.print(
-            f"\n[bold]Progress: {progress['completed_steps']}/{progress['total_steps']} "
-            f"({progress['progress_percent']:.1f}%){elapsed_str}[/bold]\n"
+        summary = (
+            f"Progress: {progress['completed_steps']}/{progress['total_steps']} "
+            f"({progress['progress_percent']:.1f}%)"
         )
 
-        # Callback if provided
-        if self.on_update:
-            self.on_update(progress)
+        panel = Panel.fit(
+            Align.center(table),
+            title="Progress",
+            subtitle=f"{summary}  {elapsed_str}",
+            border_style="blue"
+        )
+        return panel
 
     def _print_final_summary(self):
         """Print final summary when processing completes."""

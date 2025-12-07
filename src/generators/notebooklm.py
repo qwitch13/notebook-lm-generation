@@ -37,23 +37,25 @@ class NotebookLMClient:
     # CSS Selectors (may need updates if NotebookLM UI changes)
     # Updated 2025-12 for current NotebookLM interface
     SELECTORS = {
-        "new_notebook_btn": "button.create-new-notebook-button, [data-test-id='create-notebook-button'], button[aria-label*='new notebook'], button[aria-label*='New notebook'], button[aria-label*='Create'], .create-button, button.mdc-button--raised, button[jsname]",
-        "notebook_title_input": "[data-test-id='notebook-title'], input[placeholder*='title'], input[aria-label*='title'], .notebook-title-input",
-        "add_source_btn": "button[aria-label*='Add source'], button[aria-label*='add source'], [data-test-id='add-source-button'], .add-source-button, button.source-button, [aria-label='Add source']",
-        "upload_file_option": "[data-test-id='upload-file'], [aria-label*='Upload'], [aria-label*='upload'], .upload-option, button[aria-label*='file']",
+        "new_notebook_btn": "[data-test-id='create-notebook-button'], button.create-new-notebook-button, button[aria-label*='new notebook'], button[aria-label*='New notebook'], button[aria-label*='Create'], .create-button, button.mdc-button--raised, button[jsname]",
+        "notebook_title_input": "[data-test-id='notebook-title-input'], [data-test-id='notebook-title'], input[placeholder*='title'], input[aria-label*='title'], .notebook-title-input",
+        "notebook_title_header": "[data-test-id='notebook-title-header'], .notebook-title, h1",
+        "add_source_btn": "[data-test-id='add-source-button'], button[aria-label*='Add source'], button[aria-label*='add source'], .add-source-button, button.source-button, [aria-label='Add source']",
+        "sources_count": "[data-test-id='sources-count'], [aria-label*='Sources']",
+        "upload_file_option": "[data-test-id='upload-file-option'], [data-test-id='upload-file'], [aria-label*='Upload'], [aria-label*='upload'], .upload-option, button[aria-label*='file']",
         "file_input": "input[type='file']",
-        "paste_text_option": "[data-test-id='paste-text'], [aria-label*='Paste text'], [aria-label*='paste'], [aria-label*='Copied text'], .paste-text-option",
-        "text_input": "textarea[placeholder*='Paste'], textarea[aria-label*='text'], .text-input-area, textarea",
-        "website_option": "[data-test-id='website-url'], [aria-label*='Website'], [aria-label*='website'], [aria-label*='URL'], .website-option",
-        "url_input": "input[placeholder*='URL'], input[type='url'], input[aria-label*='URL']",
-        "generate_audio_btn": "button[aria-label*='Audio Overview'], button[aria-label*='audio'], button[aria-label*='Generate'], [data-test-id='generate-audio'], .audio-overview-button, [data-test-id='audio-overview-generate']",
+        "paste_text_option": "[data-test-id='paste-text-option'], [data-test-id='paste-text'], [aria-label*='Paste text'], [aria-label*='paste'], [aria-label*='Copied text'], .paste-text-option",
+        "text_input": "textarea[data-test-id='pasted-text-input'], textarea[placeholder*='Paste'], textarea[aria-label*='text'], .text-input-area, textarea",
+        "website_option": "[data-test-id='website-url-option'], [data-test-id='website-url'], [aria-label*='Website'], [aria-label*='website'], [aria-label*='URL'], .website-option",
+        "url_input": "input[data-test-id='website-url-input'], input[placeholder*='URL'], input[type='url'], input[aria-label*='URL']",
+        "generate_audio_btn": "[data-test-id='audio-overview-generate-button'], [data-test-id='generate-audio'], button[aria-label*='Audio Overview'], button[aria-label*='audio'], button[aria-label*='Generate'], .audio-overview-button, [data-test-id='audio-overview-generate']",
         "studio_tab": "[data-test-id='studio-tab'], [aria-label*='Studio'], button[aria-label*='Audio'], .studio-tab",
-        "chat_input": "textarea[aria-label*='message'], textarea[placeholder*='Ask'], [data-test-id='chat-input'], .chat-input, textarea",
-        "send_btn": "button[aria-label*='Send'], button[aria-label*='submit'], [data-test-id='send-button'], .send-button",
-        "response_container": "[data-test-id='response'], .response-container, .chat-response, .message-content",
-        "download_btn": "button[aria-label*='Download'], [data-test-id='download'], .download-button",
-        "audio_player": "audio, [data-test-id='audio-player']",
-        "loading_indicator": "[data-test-id='loading'], .loading, .spinner, [role='progressbar']",
+        "chat_input": "[data-test-id='chat-input'], textarea[aria-label*='message'], textarea[placeholder*='Ask'], .chat-input, textarea",
+        "send_btn": "[data-test-id='send-button'], button[aria-label*='Send'], button[aria-label*='submit'], .send-button",
+        "response_container": "[data-test-id='chat-response'], [data-test-id='response'], .response-container, .chat-response, .message-content",
+        "download_btn": "[data-test-id='download-button'], [data-test-id='download'], button[aria-label*='Download'], .download-button",
+        "audio_player": "[data-test-id='audio-player'], audio",
+        "loading_indicator": "[data-test-id='loading-indicator'], [data-test-id='loading'], .loading, .spinner, [role='progressbar']",
         # Potential overlays/popups that can intercept clicks
         "overlay": ".kPY6ve, [role='dialog'], [aria-modal='true'], .mdc-dialog__surface, .cdk-overlay-container, .modal-backdrop",
     }
@@ -106,6 +108,15 @@ class NotebookLMClient:
                     time.sleep(1)
             except Exception:
                 self.logger.debug("Could not set notebook title directly")
+
+            # Verify notebook interface is available; otherwise ask for manual creation
+            try:
+                WebDriverWait(self.driver, 20).until(
+                    lambda d: self._has_notebook_interface(d)
+                )
+            except Exception:
+                self.logger.warning("Notebook interface not detected after creation click; switching to manual flow")
+                return self._manual_notebook_creation(name)
 
             self.current_notebook = NotebookProject(
                 name=name,
@@ -163,6 +174,7 @@ class NotebookLMClient:
             selectors = [
                 self.SELECTORS["add_source_btn"],
                 self.SELECTORS["chat_input"],
+                "[data-test-id='notebook-view']",
                 "[data-test-id='notebook']",
                 ".notebook-content",
             ]
@@ -203,20 +215,22 @@ class NotebookLMClient:
         self.logger.warning("2. Select 'Copied text' or 'Paste text'")
         self.logger.warning(f"3. {clipboard_msg}")
         self.logger.warning("4. Paste the content and submit")
-        self.logger.warning("Waiting up to 2 minutes...")
+        self.logger.warning("Waiting up to 2 minutes for source to be added...")
         self.logger.warning("=" * 50)
 
         # Wait for user to add source
-        initial_sources = self.current_notebook.sources_count if self.current_notebook else 0
+        initial_sources = self.get_sources_count()
         try:
-            # Wait for some indication that source was added
-            time.sleep(120)  # Give user 2 minutes
-            self.logger.info("Continuing after manual source addition wait...")
+            WebDriverWait(self.driver, 120).until(
+                lambda d: self.get_sources_count() > initial_sources
+            )
+            self.logger.info("Source added successfully!")
             if self.current_notebook:
-                self.current_notebook.sources_count += 1
+                self.current_notebook.sources_count = self.get_sources_count()
             return True
-        except Exception:
-            return True  # Assume it worked
+        except TimeoutException:
+            self.logger.warning("Timeout waiting for source addition, continuing anyway...")
+            return True
 
     def _manual_generate_audio(self) -> bool:
         """
@@ -255,6 +269,7 @@ class NotebookLMClient:
             True if successful
         """
         self.logger.info(f"Adding text source: {title}")
+        initial_sources = self.get_sources_count()
 
         try:
             # Click add source button
@@ -281,9 +296,14 @@ class NotebookLMClient:
 
             # Wait for processing
             self._wait_for_loading()
+            
+            # Verify source was added
+            WebDriverWait(self.driver, 30).until(
+                lambda d: self.get_sources_count() > initial_sources
+            )
 
             if self.current_notebook:
-                self.current_notebook.sources_count += 1
+                self.current_notebook.sources_count = self.get_sources_count()
 
             self.logger.info(f"Added text source: {title}")
             return True
@@ -303,6 +323,7 @@ class NotebookLMClient:
             True if successful
         """
         self.logger.info(f"Adding file source: {file_path}")
+        initial_sources = self.get_sources_count()
 
         try:
             # Click add source button
@@ -320,9 +341,14 @@ class NotebookLMClient:
 
             # Wait for upload to complete
             self._wait_for_loading(timeout=60)
+            
+            # Verify source was added
+            WebDriverWait(self.driver, 30).until(
+                lambda d: self.get_sources_count() > initial_sources
+            )
 
             if self.current_notebook:
-                self.current_notebook.sources_count += 1
+                self.current_notebook.sources_count = self.get_sources_count()
 
             self.logger.info(f"Added file source: {file_path.name}")
             return True
@@ -342,6 +368,7 @@ class NotebookLMClient:
             True if successful
         """
         self.logger.info(f"Adding website source: {url}")
+        initial_sources = self.get_sources_count()
 
         try:
             # Click add source button
@@ -362,9 +389,14 @@ class NotebookLMClient:
 
             # Wait for processing
             self._wait_for_loading(timeout=60)
+            
+            # Verify source was added
+            WebDriverWait(self.driver, 30).until(
+                lambda d: self.get_sources_count() > initial_sources
+            )
 
             if self.current_notebook:
-                self.current_notebook.sources_count += 1
+                self.current_notebook.sources_count = self.get_sources_count()
 
             self.logger.info(f"Added website source: {url}")
             return True
@@ -397,12 +429,27 @@ class NotebookLMClient:
             # Wait for generation (can take several minutes)
             self._wait_for_loading(timeout=300)
 
-            self.logger.info("Audio overview generation started")
-            return True
+            # Verify that an audio player or result appears
+            audio_el = self._find_element(self.SELECTORS["audio_player"], timeout=5)
+            if audio_el:
+                self.logger.info("Audio overview generation started")
+                return True
+            else:
+                self.logger.warning("Audio player not found after generation trigger; requesting manual generation")
+                # Fall back to manual generation flow
+                if self._manual_generate_audio():
+                    # After manual wait, check again
+                    audio_el2 = self._find_element(self.SELECTORS["audio_player"], timeout=5)
+                    return audio_el2 is not None
+                return False
 
         except Exception as e:
             self.logger.error(f"Failed to generate audio overview automatically: {e}")
-            return self._manual_generate_audio()
+            ok = self._manual_generate_audio()
+            if ok:
+                audio_el = self._find_element(self.SELECTORS["audio_player"], timeout=5)
+                return audio_el is not None
+            return False
 
     def send_chat_message(self, message: str) -> Optional[str]:
         """
@@ -598,6 +645,30 @@ class NotebookLMClient:
             self.logger.debug("Loading wait timed out")
         except Exception:
             pass  # Loading indicator might not exist
+
+    def get_sources_count(self) -> int:
+        """Get the current number of sources in the notebook."""
+        try:
+            count_element = self._find_element(self.SELECTORS["sources_count"], timeout=5)
+            if count_element:
+                # Extract number from text like "Sources (5)"
+                import re
+                match = re.search(r'\((\d+)\)', count_element.text)
+                if match:
+                    return int(match.group(1))
+            # Fallback for just a number
+            return int(count_element.text)
+        except Exception:
+            return 0
+            
+    def get_notebook_title(self) -> Optional[str]:
+        """Get the title of the current notebook."""
+        try:
+            title_element = self._find_element(self.SELECTORS["notebook_title_header"], timeout=5)
+            if title_element:
+                return title_element.text
+        except Exception:
+            return None
 
     def get_audio_url(self) -> Optional[str]:
         """Get the URL of the generated audio."""
