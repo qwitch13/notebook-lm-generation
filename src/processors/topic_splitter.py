@@ -236,25 +236,48 @@ Return ONLY valid JSON, no additional text."""
 
     def _extract_json(self, text: str) -> str:
         """Extract JSON from text that may contain markdown or other content."""
+        import re
+
         # Remove markdown code blocks
         if "```json" in text:
             start = text.find("```json") + 7
             end = text.find("```", start)
             if end > start:
-                return text[start:end].strip()
+                text = text[start:end].strip()
 
-        if "```" in text:
+        elif "```" in text:
             start = text.find("```") + 3
             end = text.find("```", start)
             if end > start:
-                return text[start:end].strip()
+                text = text[start:end].strip()
 
         # Try to find JSON object boundaries
         first_brace = text.find("{")
         last_brace = text.rfind("}")
 
         if first_brace != -1 and last_brace > first_brace:
-            return text[first_brace:last_brace + 1]
+            text = text[first_brace:last_brace + 1]
+
+        # Clean up common issues
+        # Remove any trailing commas before closing brackets (invalid JSON)
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+
+        # Try to fix truncated JSON by finding balanced braces
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError:
+            # Try to repair by ensuring balanced braces
+            open_braces = text.count('{')
+            close_braces = text.count('}')
+            if open_braces > close_braces:
+                text += '}' * (open_braces - close_braces)
+
+            open_brackets = text.count('[')
+            close_brackets = text.count(']')
+            if open_brackets > close_brackets:
+                text += ']' * (open_brackets - close_brackets)
 
         return text.strip()
 

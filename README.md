@@ -138,6 +138,23 @@ nlmgen document.pdf \
     -v  # verbose mode
 ```
 
+### Saving Credentials
+
+You can save your API key and credentials for future use:
+
+```bash
+# Save Gemini API key
+nlmgen --add-key 'YOUR_API_KEY'
+
+# Save Google credentials
+nlmgen --save-user -e 'email@gmail.com' -p 'password'
+
+# Future runs use saved credentials automatically
+nlmgen document.pdf
+```
+
+Credentials are stored in `~/.config/nlmgen/config`.
+
 ### Command Line Arguments
 
 | Argument | Description |
@@ -148,6 +165,8 @@ nlmgen document.pdf \
 | `-o, --output` | Output directory |
 | `--headless` | Run browser in headless mode |
 | `--api-key` | Gemini API key |
+| `--add-key KEY` | Save Gemini API key for future use |
+| `--save-user` | Save email/password for future use |
 | `-v, --verbose` | Enable verbose output |
 | `-h, --help` | Show help message |
 
@@ -161,20 +180,23 @@ nlmgen --help
 man nlmgen
 ```
 
-## Authentication & 2FA
+## Authentication
 
-When logging in with Google credentials:
+The tool uses manual login mode for maximum reliability:
 
-1. A browser window will open
-2. Enter your email (automated)
-3. Enter your password (automated)
-4. **If 2FA/passkey is required**: Complete verification manually in the browser
-   - Touch ID / fingerprint
-   - Security key
-   - Authenticator app code
-5. The tool will detect completion and continue automatically
+1. A browser window will open to Google Sign In
+2. **Log in manually** with your Google account
+3. Complete any 2FA/passkey verification as needed
+4. The tool detects successful login and continues automatically
 
-The tool waits up to 2 minutes for manual verification.
+The tool waits up to 3 minutes for login completion. After first login, cookies are saved so future runs may not require re-authentication.
+
+### Manual Actions
+
+Some actions may require manual intervention:
+
+- **Notebook Creation**: If automatic creation fails, you'll be prompted to create a notebook manually in NotebookLM
+- **Rate Limits**: If API rate limits are hit, the tool waits and retries automatically
 
 ## Output Structure
 

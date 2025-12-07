@@ -78,6 +78,13 @@
 - [x] Login uses saved session cookies when available
 - [x] 3-minute timeout for manual login completion
 
+#### Phase 10: Enhanced Error Handling (2025-12-07)
+- [x] Improved JSON extraction with balanced brace repair
+- [x] Added manual notebook creation fallback when button not found
+- [x] Enhanced rate limit detection for daily quota vs per-minute limits
+- [x] Clear messaging when daily API quota is exceeded
+- [x] 2-minute timeout for manual notebook creation
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks

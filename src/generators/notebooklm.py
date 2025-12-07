@@ -84,11 +84,15 @@ class NotebookLMClient:
             if "notebooklm" not in self.driver.current_url.lower():
                 self.navigate_to_notebooklm()
 
-            time.sleep(2)
+            time.sleep(3)
 
-            # Click create new notebook button
-            self._click_element(self.SELECTORS["new_notebook_btn"])
-            time.sleep(2)
+            # Try to click create new notebook button
+            try:
+                self._click_element(self.SELECTORS["new_notebook_btn"], timeout=5)
+                time.sleep(2)
+            except TimeoutException:
+                # Button not found - ask user to create manually
+                return self._manual_notebook_creation(name)
 
             # Set notebook title if input is available
             try:
@@ -111,7 +115,65 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to create notebook: {e}")
-            raise
+            # Fall back to manual creation
+            return self._manual_notebook_creation(name)
+
+    def _manual_notebook_creation(self, name: str) -> NotebookProject:
+        """
+        Ask user to create notebook manually.
+
+        Args:
+            name: Name for the notebook
+
+        Returns:
+            NotebookProject instance
+        """
+        self.logger.warning("=" * 50)
+        self.logger.warning("MANUAL ACTION REQUIRED")
+        self.logger.warning(f"Please create a new notebook named: {name[:50]}...")
+        self.logger.warning("1. Click 'Create new' or '+' button in NotebookLM")
+        self.logger.warning("2. The tool will continue automatically")
+        self.logger.warning("Waiting up to 2 minutes...")
+        self.logger.warning("=" * 50)
+
+        # Wait for user to create notebook (URL will change to include notebook ID)
+        initial_url = self.driver.current_url
+        try:
+            WebDriverWait(self.driver, 120).until(
+                lambda d: d.current_url != initial_url or
+                          "notebook" in d.current_url.lower() or
+                          self._has_notebook_interface(d)
+            )
+            self.logger.info("Notebook created successfully!")
+        except TimeoutException:
+            self.logger.warning("Timeout waiting for notebook creation, continuing anyway...")
+
+        self.current_notebook = NotebookProject(
+            name=name,
+            url=self.driver.current_url
+        )
+        return self.current_notebook
+
+    def _has_notebook_interface(self, driver) -> bool:
+        """Check if the notebook interface is visible."""
+        try:
+            # Look for notebook-specific elements
+            selectors = [
+                self.SELECTORS["add_source_btn"],
+                self.SELECTORS["chat_input"],
+                "[data-test-id='notebook']",
+                ".notebook-content",
+            ]
+            for selector in selectors:
+                for sel in selector.split(", "):
+                    try:
+                        driver.find_element(By.CSS_SELECTOR, sel.strip())
+                        return True
+                    except NoSuchElementException:
+                        continue
+        except Exception:
+            pass
+        return False
 
     def add_text_source(self, text: str, title: str = "Source") -> bool:
         """

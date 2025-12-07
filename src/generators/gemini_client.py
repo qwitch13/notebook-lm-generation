@@ -103,6 +103,8 @@ class GeminiClient:
         max_retries: int = 3
     ) -> Optional[GeminiResponse]:
         """Generate using the Gemini API with retry logic for rate limits."""
+        import re
+
         for attempt in range(max_retries):
             try:
                 response = self.api_model.generate_content(
@@ -123,13 +125,25 @@ class GeminiClient:
                 error_str = str(e)
                 # Check for rate limit errors (429)
                 if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                    # Check if it's a daily quota (can't retry quickly)
+                    is_daily_quota = "PerDay" in error_str or "per day" in error_str.lower()
+
+                    if is_daily_quota:
+                        self.logger.error("=" * 50)
+                        self.logger.error("DAILY API QUOTA EXCEEDED")
+                        self.logger.error("Your Gemini API daily quota has been reached.")
+                        self.logger.error("Options:")
+                        self.logger.error("  1. Wait until tomorrow for quota reset")
+                        self.logger.error("  2. Use a different API key")
+                        self.logger.error("  3. Upgrade to a paid plan")
+                        self.logger.error("=" * 50)
+                        return None
+
                     # Extract retry delay if provided
                     retry_delay = 60  # Default to 60 seconds
-                    if "retry in" in error_str.lower():
-                        import re
-                        match = re.search(r'retry in (\d+)', error_str.lower())
-                        if match:
-                            retry_delay = int(match.group(1)) + 5  # Add buffer
+                    match = re.search(r'retry in (\d+)', error_str.lower())
+                    if match:
+                        retry_delay = int(match.group(1)) + 5  # Add buffer
 
                     if attempt < max_retries - 1:
                         self.logger.warning(f"Rate limited. Waiting {retry_delay}s before retry {attempt + 2}/{max_retries}...")
