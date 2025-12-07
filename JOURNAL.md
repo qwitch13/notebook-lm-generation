@@ -85,6 +85,15 @@
 - [x] Clear messaging when daily API quota is exceeded
 - [x] 2-minute timeout for manual notebook creation
 
+#### Phase 11: Stability Improvements (2025-12-07)
+- [x] Fixed JSON parsing - added more aggressive whitespace stripping
+- [x] Added debug logging for raw Gemini responses to diagnose parsing issues
+- [x] Fixed stale element handling with retry logic in `_find_element()` and `_click_element()`
+- [x] Added `_manual_add_source()` fallback when automatic source addition fails
+- [x] Added `_manual_generate_audio()` fallback when audio button not found
+- [x] Clipboard integration (pyperclip) to copy source text for manual paste
+- [x] All NotebookLM automation now falls back to manual user actions when selectors fail
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks

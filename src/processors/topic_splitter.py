@@ -238,6 +238,12 @@ Return ONLY valid JSON, no additional text."""
         """Extract JSON from text that may contain markdown or other content."""
         import re
 
+        # Log raw response for debugging
+        self.logger.debug(f"Raw Gemini response (first 500 chars): {text[:500]}")
+
+        # Strip leading/trailing whitespace first
+        text = text.strip()
+
         # Remove markdown code blocks
         if "```json" in text:
             start = text.find("```json") + 7
@@ -251,6 +257,9 @@ Return ONLY valid JSON, no additional text."""
             if end > start:
                 text = text[start:end].strip()
 
+        # Strip again after extracting from code blocks
+        text = text.strip()
+
         # Try to find JSON object boundaries
         first_brace = text.find("{")
         last_brace = text.rfind("}")
@@ -258,16 +267,24 @@ Return ONLY valid JSON, no additional text."""
         if first_brace != -1 and last_brace > first_brace:
             text = text[first_brace:last_brace + 1]
 
+        # Strip internal whitespace issues - normalize newlines
+        # This fixes the '\n    "overview"' error
+        text = text.strip()
+
         # Clean up common issues
         # Remove any trailing commas before closing brackets (invalid JSON)
         text = re.sub(r',\s*}', '}', text)
         text = re.sub(r',\s*]', ']', text)
 
+        # Remove control characters that might break JSON parsing
+        text = re.sub(r'[\x00-\x1f\x7f]', lambda m: ' ' if m.group() in '\n\r\t' else '', text)
+
         # Try to fix truncated JSON by finding balanced braces
         try:
             json.loads(text)
             return text
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            self.logger.debug(f"JSON parse attempt failed: {e}")
             # Try to repair by ensuring balanced braces
             open_braces = text.count('{')
             close_braces = text.count('}')
@@ -278,6 +295,14 @@ Return ONLY valid JSON, no additional text."""
             close_brackets = text.count(']')
             if open_brackets > close_brackets:
                 text += ']' * (open_brackets - close_brackets)
+
+            # Try parsing again after repair
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as e2:
+                self.logger.warning(f"JSON repair failed: {e2}")
+                # Log more context for debugging
+                self.logger.debug(f"Problematic JSON (first 1000 chars): {text[:1000]}")
 
         return text.strip()
 
