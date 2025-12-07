@@ -2,6 +2,7 @@
 
 import time
 import pickle
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 
 try:
     import undetected_chromedriver as uc
@@ -54,344 +55,216 @@ class GoogleAuthenticator:
         self.settings = get_settings()
         self.driver: Optional[webdriver.Chrome] = None
 
-    def _create_driver(self) -> webdriver.Chrome:
+    def _create_driver(self) -> Optional[webdriver.Chrome]:
         """Create and configure the Chrome WebDriver."""
-        if HAS_UNDETECTED:
-            # Use undetected-chromedriver to bypass bot detection
-            options = uc.ChromeOptions()
+        self.logger.info("Creating new WebDriver instance...")
+        try:
+            if HAS_UNDETECTED and self.settings.use_undetected_chromedriver:
+                self.logger.debug("Using undetected-chromedriver.")
+                options = uc.ChromeOptions()
+                if self.headless:
+                    options.add_argument("--headless=new")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument(f"--window-size={self.settings.window_size}")
+                driver = uc.Chrome(options=options, version_main=self.settings.chrome_version)
+            else:
+                self.logger.debug("Using standard Selenium chromedriver.")
+                options = Options()
+                if self.headless:
+                    options.add_argument("--headless=new")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument(f"--window-size={self.settings.window_size}")
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option("useAutomationExtension", False)
+                
+                try:
+                    service = Service(ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service, options=options)
+                except Exception as e:
+                    self.logger.error(f"Failed to install/use ChromeDriverManager: {e}")
+                    self.logger.error("Please ensure Chrome is installed or specify chrome_version in settings.")
+                    return None
 
-            if self.headless:
-                options.add_argument("--headless=new")
+                driver.execute_script(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+                )
 
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("--window-size=1920,1080")
+            driver.set_page_load_timeout(self.settings.page_load_timeout)
+            self.logger.info("WebDriver instance created successfully.")
+            return driver
+        except Exception as e:
+            self.logger.error(f"FATAL: Failed to create WebDriver: {e}")
+            self.logger.error(traceback.format_exc())
+            return None
 
-            driver = uc.Chrome(options=options)
-        else:
-            # Fallback to regular Chrome
-            options = Options()
-
-            if self.headless:
-                options.add_argument("--headless=new")
-
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("--window-size=1920,1080")
-
-            # Remove automation flags
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option("useAutomationExtension", False)
-
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=options)
-
-            # Execute script to remove webdriver property
-            driver.execute_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
-
-        driver.set_page_load_timeout(self.settings.page_load_timeout)
-        return driver
-
-    def get_driver(self) -> webdriver.Chrome:
+    def get_driver(self, force_recreate: bool = False) -> Optional[webdriver.Chrome]:
         """Get the WebDriver instance, creating it if necessary."""
-        if self.driver is None:
-            self.driver = self._create_driver()
+        if self.driver and not force_recreate:
+            # Check if driver is still alive
+            try:
+                _ = self.driver.window_handles
+                self.logger.debug("Returning existing WebDriver instance.")
+                return self.driver
+            except WebDriverException:
+                self.logger.warning("WebDriver is not responding. Creating a new one.")
+                self.driver = None
+
+        if self.driver and force_recreate:
+            self.logger.info("Forcing re-creation of WebDriver instance.")
+            self.close()
+
+        self.driver = self._create_driver()
         return self.driver
 
     def _save_cookies(self):
         """Save cookies to file for session persistence."""
-        if self.driver:
-            cookies_path = self.cookies_dir / self.COOKIES_FILE
+        if not self.driver:
+            return
+        cookies_path = self.cookies_dir / self.COOKIES_FILE
+        try:
             with open(cookies_path, "wb") as f:
                 pickle.dump(self.driver.get_cookies(), f)
             self.logger.debug(f"Saved cookies to {cookies_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save cookies: {e}")
 
     def _load_cookies(self) -> bool:
         """Load cookies from file if available."""
         cookies_path = self.cookies_dir / self.COOKIES_FILE
-
         if not cookies_path.exists():
+            self.logger.debug("Cookies file not found.")
+            return False
+
+        if not self.driver:
+            self.logger.error("Cannot load cookies, driver is not initialized.")
             return False
 
         try:
             with open(cookies_path, "rb") as f:
                 cookies = pickle.load(f)
 
-            # First navigate to Google to set domain
+            self.logger.debug("Navigating to google.com to set cookies.")
             self.driver.get("https://www.google.com")
             time.sleep(1)
 
             for cookie in cookies:
-                try:
-                    self.driver.add_cookie(cookie)
-                except Exception:
-                    pass  # Some cookies may fail due to domain mismatch
+                self.driver.add_cookie(cookie)
 
-            self.logger.debug("Loaded cookies from file")
+            self.logger.info("Loaded cookies from file.")
             return True
-
         except Exception as e:
             self.logger.warning(f"Failed to load cookies: {e}")
             return False
 
-    def login_google(self, email: Optional[str] = None, password: Optional[str] = None) -> bool:
+    def login_google(self) -> bool:
         """
-        Log into Google account.
-
-        Opens the browser and lets the user log in manually.
-        Waits for successful login before continuing.
-
-        Args:
-            email: Google account email (not used - for manual login)
-            password: Google account password (not used - for manual login)
-
-        Returns:
-            True if login successful, False otherwise
+        Log into Google account, handling manual login if necessary.
         """
-        driver = self.get_driver()
-
+        self.logger.info("Starting Google authentication process...")
         try:
-            # Try to use saved cookies first
-            if self._load_cookies():
-                driver.get("https://accounts.google.com")
-                time.sleep(2)
-
-                # Check if already logged in
-                if self._is_logged_in():
-                    self.logger.info("Successfully logged in using saved session")
-                    return True
-
-            # Navigate to Google Sign In for manual login
-            self.logger.info("=" * 50)
-            self.logger.info("MANUAL LOGIN REQUIRED")
-            self.logger.info("Please log into your Google account in the browser window")
-            self.logger.info("Waiting up to 3 minutes for login...")
-            self.logger.info("=" * 50)
-
-            driver.get("https://accounts.google.com/signin")
-            time.sleep(2)
-
-            # Wait for user to complete login manually
-            # Check for successful login indicators
-            try:
-                WebDriverWait(driver, 180).until(
-                    lambda d: self._check_login_success(d)
-                )
-            except TimeoutException:
-                self.logger.error("Login timed out after 3 minutes")
+            driver = self.get_driver()
+            if not driver:
+                self.logger.error("Failed to get WebDriver instance. Aborting login.")
                 return False
 
-            # Give time for session to settle
+            if self._load_cookies():
+                self.logger.debug("Checking login status with loaded cookies...")
+                driver.get("https://myaccount.google.com/u/0/")
+                time.sleep(2)
+                if "signin" not in driver.current_url:
+                    self.logger.info("Successfully logged in using saved session.")
+                    return True
+                self.logger.info("Cookie session is invalid or expired. Proceeding with manual login.")
+
+            self.logger.warning("=" * 50)
+            self.logger.warning("MANUAL LOGIN REQUIRED")
+            self.logger.warning("Please log into your Google account in the browser window.")
+            self.logger.warning("If you see a 'Welcome' screen, please dismiss it.")
+            self.logger.warning("Waiting up to 3 minutes for login...")
+            self.logger.warning("=" * 50)
+
+            driver.get("https://accounts.google.com/signin")
+
+            try:
+                WebDriverWait(driver, 180).until(
+                    lambda d: "myaccount.google.com" in d.current_url or "notebooklm.google.com" in d.current_url
+                )
+            except TimeoutException:
+                self.logger.error("Login timed out after 3 minutes. Please check the browser window.")
+                return False
+
+            self.logger.info("Login appears successful. Verifying session...")
             time.sleep(2)
 
-            # Verify login success
             if self._is_logged_in():
                 self._save_cookies()
-                self.logger.info("Successfully logged into Google account")
+                self.logger.info("Successfully verified Google login.")
                 return True
-
-            # One more check - maybe we're already on a Google page
-            current_url = driver.current_url
-            if any(domain in current_url for domain in ["google.com", "notebooklm", "gemini"]):
-                if "signin" not in current_url and "accounts.google.com/v3" not in current_url:
-                    self._save_cookies()
-                    self.logger.info("Successfully logged into Google account")
-                    return True
-
-            self.logger.error("Login failed - could not verify logged in state")
-            return False
+            else:
+                self.logger.error("Login failed. Could not verify logged-in state after manual login.")
+                return False
 
         except Exception as e:
-            self.logger.error(f"Login failed: {e}")
+            self.logger.error(f"An unexpected error occurred during Google login: {e}")
+            self.logger.error(traceback.format_exc())
             return False
-
-    def _check_login_success(self, driver) -> bool:
-        """Check if login was successful by looking at the URL and page content."""
-        current_url = driver.current_url
-
-        # Success indicators - navigated away from signin
-        success_urls = [
-            "myaccount.google.com",
-            "mail.google.com",
-            "drive.google.com",
-            "notebooklm.google.com",
-            "gemini.google.com",
-            "accounts.google.com/b/",  # Account switcher (logged in)
-        ]
-
-        if any(url in current_url for url in success_urls):
-            return True
-
-        # Still on signin page - not done yet
-        if "accounts.google.com/signin" in current_url:
-            return False
-        if "accounts.google.com/v3/signin" in current_url:
-            return False
-
-        # Check if we're past the password step but on verification
-        page_source = driver.page_source.lower()
-        if "verify" in page_source or "2-step" in page_source or "passkey" in page_source:
-            return False
-
-        # Generic check - if we're on any google.com page that's not signin
-        if "google.com" in current_url and "signin" not in current_url:
-            return True
-
-        return False
 
     def _is_logged_in(self) -> bool:
         """Check if currently logged into Google."""
+        if not self.driver:
+            return False
         try:
-            self.driver.get("https://myaccount.google.com")
+            self.logger.debug("Navigating to myaccount.google.com to verify login status.")
+            self.driver.get("https://myaccount.google.com/u/0/")
             time.sleep(2)
-
-            # Check for account avatar or signed-in indicators
-            try:
-                self.driver.find_element(By.CSS_SELECTOR, "[data-ogsr-up]")
-                return True
-            except NoSuchElementException:
-                pass
-
-            # Alternative check - look for sign in button absence
-            try:
-                self.driver.find_element(By.XPATH, "//a[contains(@href, 'signin')]")
+            
+            # If we are redirected to signin, we are not logged in.
+            if "signin" in self.driver.current_url.lower():
+                self.logger.debug("Redirected to signin page. Not logged in.")
                 return False
+
+            # Check for a known element that only appears when logged in.
+            try:
+                avatar = self.driver.find_element(By.CSS_SELECTOR, "a[href^='https://accounts.google.com/SignOutOptions']")
+                if avatar.is_displayed():
+                    self.logger.debug("Found sign-out link, assuming logged in.")
+                    return True
             except NoSuchElementException:
-                return True
+                self.logger.debug("Could not find sign-out link.")
 
-        except Exception:
-            return False
-
-    def _handle_verification(self) -> bool:
-        """Handle 2FA, passkey, or other verification steps."""
-        try:
-            # Wait a moment for any verification page to load
-            time.sleep(3)
-
-            # List of verification indicators to check
-            verification_patterns = [
-                "Verify it",
-                "2-Step Verification",
-                "passkey",
-                "Passkey",
-                "Use your passkey",
-                "fingerprint",
-                "Fingerprint",
-                "Touch ID",
-                "Face ID",
-                "security key",
-                "Confirm it's you",
-                "Verify your identity",
-                "Choose how to sign in",
-            ]
-
-            # Check if we're on a verification page
-            page_source = self.driver.page_source.lower()
-            needs_verification = any(
-                pattern.lower() in page_source for pattern in verification_patterns
-            )
-
-            if needs_verification:
-                self.logger.warning("=" * 50)
-                self.logger.warning("VERIFICATION REQUIRED")
-                self.logger.warning("Please complete verification in the browser window:")
-                self.logger.warning("- Passkey/fingerprint")
-                self.logger.warning("- 2FA code")
-                self.logger.warning("- Phone verification")
-                self.logger.warning("Waiting up to 2 minutes...")
-                self.logger.warning("=" * 50)
-
-                # Wait for manual completion - check multiple success indicators
-                WebDriverWait(self.driver, 120).until(
-                    lambda d: any([
-                        "myaccount.google.com" in d.current_url,
-                        "mail.google.com" in d.current_url,
-                        "notebooklm" in d.current_url.lower(),
-                        "gemini" in d.current_url.lower(),
-                        "accounts.google.com/b/" in d.current_url,  # Account switcher (logged in)
-                    ])
-                )
-                self.logger.info("Verification completed successfully!")
-                return True
-
-            return False
-
-        except TimeoutException:
-            self.logger.error("Verification timed out - please try again")
-            return False
+            self.logger.warning("Could not definitively verify login status, but not on signin page.")
+            return True # Assume logged in if not on a signin page
         except Exception as e:
-            self.logger.debug(f"Verification handling: {e}")
+            self.logger.error(f"Error checking login status: {e}")
             return False
 
     def navigate_to_notebooklm(self) -> bool:
         """Navigate to NotebookLM."""
+        self.logger.debug("Navigating to NotebookLM...")
         try:
             driver = self.get_driver()
+            if not driver:
+                return False
             driver.get(self.settings.notebooklm_url)
-            time.sleep(3)
-
-            # Wait for page to load
-            WebDriverWait(driver, 30).until(
-                lambda d: "notebooklm" in d.current_url.lower()
-            )
-
-            self.logger.info("Navigated to NotebookLM")
+            WebDriverWait(driver, 30).until(EC.url_contains("notebooklm.google.com"))
+            self.logger.info("Successfully navigated to NotebookLM.")
             return True
-
         except Exception as e:
             self.logger.error(f"Failed to navigate to NotebookLM: {e}")
-            return False
-
-    def navigate_to_gemini(self) -> bool:
-        """Navigate to Gemini."""
-        try:
-            driver = self.get_driver()
-            driver.get(self.settings.gemini_url)
-            time.sleep(3)
-
-            # Wait for page to load
-            WebDriverWait(driver, 30).until(
-                lambda d: "gemini" in d.current_url.lower()
-            )
-
-            self.logger.info("Navigated to Gemini")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to navigate to Gemini: {e}")
-            return False
-
-    def open_gemini_in_new_tab(self) -> bool:
-        """Open Gemini in a new browser tab."""
-        try:
-            driver = self.get_driver()
-
-            # Open new tab
-            driver.execute_script("window.open('');")
-            driver.switch_to.window(driver.window_handles[-1])
-
-            # Navigate to Gemini
-            driver.get(self.settings.gemini_url)
-            time.sleep(3)
-
-            self.logger.info("Opened Gemini in new tab")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to open Gemini in new tab: {e}")
+            self.logger.error(traceback.format_exc())
             return False
 
     def close(self):
         """Close the browser and cleanup."""
         if self.driver:
+            self.logger.debug("Closing WebDriver instance.")
             try:
                 self._save_cookies()
                 self.driver.quit()
-                self.logger.debug("Browser closed")
             except Exception as e:
                 self.logger.warning(f"Error closing browser: {e}")
             finally:

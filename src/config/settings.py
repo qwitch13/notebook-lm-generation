@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Browser settings
     chrome_driver_path: Optional[str] = Field(default=None, alias="CHROME_DRIVER_PATH")
     headless_browser: bool = Field(default=False, alias="HEADLESS_BROWSER")
+    window_size: str = Field(default="1920,1080", alias="WINDOW_SIZE")
+    use_undetected_chromedriver: bool = Field(default=True, alias="USE_UNDETECTED_CHROMEDRIVER")
+    chrome_version: Optional[int] = Field(default=None, alias="CHROME_VERSION")
 
     # NotebookLM URLs
     notebooklm_url: str = "https://notebooklm.google.com"

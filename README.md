@@ -138,6 +138,23 @@ nlmgen document.pdf \
     -v  # verbose mode
 ```
 
+### Using an Existing NotebookLM Notebook (Recommended)
+
+If you've already created a NotebookLM notebook with your content uploaded, you can use it directly to avoid API rate limits:
+
+```bash
+# Use existing notebook - bypasses Gemini API rate limits!
+nlmgen document.pdf --notebook-url "https://notebooklm.google.com/notebook/your-notebook-id"
+
+# No API mode - uses only NotebookLM for all generation (unlimited!)
+nlmgen document.pdf --notebook-url "https://notebooklm.google.com/notebook/your-notebook-id" --no-api
+```
+
+This is especially useful when:
+- You've hit Gemini API rate limits
+- You want to use NotebookLM's unlimited generation capabilities
+- You have a pre-existing notebook with sources already added
+
 ### Saving Credentials
 
 You can save your API key and credentials for future use:
@@ -167,6 +184,8 @@ Credentials are stored in `~/.config/nlmgen/config`.
 | `--api-key` | Gemini API key |
 | `--add-key KEY` | Save Gemini API key for future use |
 | `--save-user` | Save email/password for future use |
+| `--notebook-url` | URL of existing NotebookLM notebook to use |
+| `--no-api` | Disable Gemini API, use only NotebookLM chat (unlimited) |
 | `-v, --verbose` | Enable verbose output |
 | `-h, --help` | Show help message |
 
@@ -242,9 +261,11 @@ The tool displays progress updates every 15 seconds showing:
 - Don't use `--headless` when 2FA is required
 - Check the browser window for verification prompts
 
-**API errors:**
+**API errors / Rate limits:**
 - Verify your Gemini API key is valid
 - Check API quota limits
+- **Recommended**: Use `--notebook-url` with an existing NotebookLM notebook to bypass API limits
+- Use `--no-api` flag to disable API entirely and use only NotebookLM's unlimited chat
 - The tool will fall back to browser automation if API fails
 
 **NotebookLM issues:**

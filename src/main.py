@@ -46,13 +46,17 @@ class NotebookLMGenerator:
         password: Optional[str] = None,
         headless: bool = False,
         output_dir: Optional[Path] = None,
-        gemini_api_key: Optional[str] = None
+        gemini_api_key: Optional[str] = None,
+        notebook_url: Optional[str] = None,
+        no_api: bool = False
     ):
         self.input_path = Path(input_path) if not input_path.startswith("http") else input_path
         self.email = email
         self.password = password
         self.headless = headless
         self.settings = get_settings()
+        self.notebook_url = notebook_url  # Use existing NotebookLM notebook
+        self.no_api = no_api  # Don't use Gemini API, only NotebookLM chat
 
         # Determine output directory
         if output_dir:
@@ -155,11 +159,24 @@ class NotebookLMGenerator:
 
             # Initialize clients
             self.notebooklm = NotebookLMClient(self.authenticator)
-            self.gemini = GeminiClient(
-                api_key=self.gemini_api_key,
-                authenticator=self.authenticator,
-                use_browser=False  # Use API by default
-            )
+
+            # Navigate to existing notebook if URL provided
+            if self.notebook_url:
+                self.logger.info(f"Using existing NotebookLM notebook: {self.notebook_url}")
+                self.authenticator.get_driver().get(self.notebook_url)
+                import time
+                time.sleep(3)  # Wait for notebook to load
+
+            # Initialize Gemini client (skip if --no-api)
+            if self.no_api:
+                self.logger.info("Running in NO-API mode - using only NotebookLM chat for generation")
+                self.gemini = None
+            else:
+                self.gemini = GeminiClient(
+                    api_key=self.gemini_api_key,
+                    authenticator=self.authenticator,
+                    use_browser=False  # Use API by default
+                )
 
             self.progress.complete_step(ProcessingStep.AUTHENTICATION)
             return True
@@ -193,7 +210,9 @@ class NotebookLMGenerator:
         self.progress.set_step(ProcessingStep.TOPIC_SPLITTING, "Analyzing content and splitting into topics...")
 
         try:
-            splitter = TopicSplitter(api_key=self.gemini_api_key)
+            # Use fallback splitting if --no-api mode
+            api_key = None if self.no_api else self.gemini_api_key
+            splitter = TopicSplitter(api_key=api_key)
             split_content = splitter.split(content)
 
             self.logger.info(f"Split into {split_content.total_topics} topics")
@@ -258,17 +277,26 @@ class NotebookLMGenerator:
             try:
                 self.logger.debug(f"NotebookLM client exists: {self.notebooklm is not None}")
                 if self.notebooklm:
-                    self.logger.debug("Creating notebook...")
-                    self.notebooklm.create_notebook(topic.title)
-                    self.logger.debug("Adding text source...")
-                    src_ok = self.notebooklm.add_text_source(topic.content, topic.title)
-                    if src_ok:
-                        self.logger.debug("Generating audio overview...")
+                    # Skip notebook creation if using existing notebook URL
+                    if self.notebook_url:
+                        self.logger.info("Using existing notebook - skipping notebook creation")
+                        # Just generate audio from existing notebook
+                        self.logger.debug("Generating audio overview from existing notebook...")
                         gen_ok = self.notebooklm.generate_audio_overview()
                         video_ok = bool(gen_ok)
-                        self.logger.debug(f"Audio generation result: {gen_ok}")
                     else:
-                        self.logger.warning("Add source step did not complete successfully; skipping audio generation")
+                        # Create new notebook for each topic (original behavior)
+                        self.logger.debug("Creating notebook...")
+                        self.notebooklm.create_notebook(topic.title)
+                        self.logger.debug("Adding text source...")
+                        src_ok = self.notebooklm.add_text_source(topic.content, topic.title)
+                        if src_ok:
+                            self.logger.debug("Generating audio overview...")
+                            gen_ok = self.notebooklm.generate_audio_overview()
+                            video_ok = bool(gen_ok)
+                            self.logger.debug(f"Audio generation result: {gen_ok}")
+                        else:
+                            self.logger.warning("Add source step did not complete successfully; skipping audio generation")
                 else:
                     self.logger.warning("NotebookLM client is None, skipping video generation")
             except Exception as e:
@@ -526,6 +554,17 @@ def main():
     )
 
     parser.add_argument(
+        "--notebook-url",
+        help="Use existing NotebookLM notebook URL (skip creating new notebooks)"
+    )
+
+    parser.add_argument(
+        "--no-api",
+        action="store_true",
+        help="Don't use Gemini API - use only NotebookLM chat for generation (unlimited)"
+    )
+
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Verbose output"
@@ -584,7 +623,9 @@ def main():
         password=password,
         headless=args.headless,
         output_dir=output_dir,
-        gemini_api_key=api_key
+        gemini_api_key=api_key if not args.no_api else None,
+        notebook_url=args.notebook_url,
+        no_api=args.no_api
     )
 
     success = generator.run()

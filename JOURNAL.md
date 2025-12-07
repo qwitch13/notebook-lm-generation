@@ -114,6 +114,14 @@
 - [x] Added per-topic progress logging with topic index
 - [x] Created `current-instr.txt` for multi-agent collaboration instructions
 
+#### Phase 14: NotebookLM-Only Mode (2025-12-07)
+- [x] Added `--notebook-url` option to use existing NotebookLM notebook
+- [x] Added `--no-api` option to disable Gemini API entirely
+- [x] When using existing notebook, skip creating new notebooks for each topic
+- [x] Topic splitting uses fallback (local) method when `--no-api` is set
+- [x] All content generation uses NotebookLM chat (unlimited) instead of Gemini API
+- [x] This avoids API rate limits - NotebookLM generation is unlimited!
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks
