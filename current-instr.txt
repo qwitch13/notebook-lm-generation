@@ -1,0 +1,109 @@
+# CURRENT INSTRUCTIONS FOR ALL AGENTS
+# Priority: HIGH - Fix these issues NOW
+# Date: 2025-12-07
+
+## PROBLEM SUMMARY
+The tool runs but ALL generation steps after Topic Splitting are "Skipped":
+- Authentication ✓
+- Content Loading ✓
+- Topic Splitting ✓ (uses fallback due to JSON parse error)
+- Video Generation: Skipped
+- ALL other steps: Skipped
+
+## ROOT CAUSES IDENTIFIED
+
+### Issue 1: JSON Parsing Still Failing
+```
+ERROR    Failed to split content: '\n    "overview"'
+```
+Gemini returns JSON with leading newlines before keys, possibly without outer braces.
+The `_extract_json()` function in `topic_splitter.py` isn't handling this correctly.
+
+**JUNIE/GEMINI - FIX THIS:**
+File: `src/processors/topic_splitter.py`
+- The `response_mime_type="application/json"` should force valid JSON but isn't working
+- Need to log the RAW response from Gemini to see what's actually returned
+- Handle case where response starts with `\n    "overview"` instead of `{`
+
+### Issue 2: Video Generation Exits Early (Silent Failure)
+The `_generate_all_materials()` function is exiting before processing any topics.
+This causes ALL steps to show as "Skipped" in final summary.
+
+**CLAUDE CODE - INVESTIGATE:**
+File: `src/main.py` lines 211-365
+- Add try/except around the entire for loop to catch what's happening
+- Add logging BEFORE and AFTER each generator initialization
+- Check if `self.notebooklm` or `self.notebooklm.driver` is None
+
+**JUNIE - CHECK:**
+File: `src/generators/notebooklm.py`
+- `create_notebook()` method might be throwing uncaught exception
+- `navigate_to_notebooklm()` might be failing
+- Check if browser driver is still alive
+
+### Issue 3: Log File Not Created
+The log file path has display issues (line breaks in terminal output).
+Need to ensure log file is actually being written.
+
+**CLAUDE CODE - FIX:**
+File: `src/utils/logger.py`
+- Verify log file is created and written to
+- Add more verbose debug logging
+- Make sure file path doesn't have special characters
+
+## IMMEDIATE ACTION ITEMS
+
+### For JUNIE (Browser Automation Expert):
+1. Add debug logging in `notebooklm.py`:
+   - Log when `navigate_to_notebooklm()` is called
+   - Log driver state before any operations
+   - Log all exceptions with full stack traces
+2. Check if driver is crashing during navigation
+3. Add timeout handling for all WebDriver operations
+
+### For GEMINI (API Expert):
+1. In `topic_splitter.py`, add logging of RAW Gemini response BEFORE any processing
+2. Print/log the first 1000 chars of Gemini response to see actual format
+3. Fix `_extract_json()` to handle: `\n    "overview": "..."` format
+4. Consider removing `response_mime_type` if it's causing issues
+
+### For CLAUDE CODE (Architecture):
+1. In `main.py`, wrap `_generate_all_materials()` internals in try/except:
+   ```python
+   def _generate_all_materials(self, split_content):
+       try:
+           # ... all the code ...
+       except Exception as e:
+           self.logger.error(f"FATAL in _generate_all_materials: {e}")
+           import traceback
+           self.logger.error(traceback.format_exc())
+           raise  # Re-raise to see in main error handler
+   ```
+2. Add logging at start of method to confirm it's called
+3. Add logging before each generator instantiation
+4. Check if any generator's __init__ is throwing
+
+## COLLABORATION PROTOCOL
+1. Check `.agent_state.json` before starting
+2. Claim your tasks
+3. Post messages about what you're fixing
+4. Run syntax check after changes: `python3 -m py_compile <file>`
+5. Test with: `source venv/bin/activate && python -m src.main --help`
+
+## FILES TO MODIFY
+- `src/processors/topic_splitter.py` - JSON parsing (GEMINI)
+- `src/generators/notebooklm.py` - Browser automation (JUNIE)
+- `src/main.py` - Error handling and logging (CLAUDE CODE)
+- `src/utils/logger.py` - Log file creation (CLAUDE CODE)
+
+## TEST COMMAND
+```bash
+cd /Users/qwitch13/IdeaProjects/notebook-lm-generation
+source venv/bin/activate
+nlmgen /Users/qwitch13/Documents/study/Enchanted_Networking_Protocols_AND_Layers_Study_Guide.pdf -v
+```
+
+## WHEN DONE
+1. Update JOURNAL.md with fixes
+2. Commit with descriptive message
+3. Push to origin/master

@@ -210,21 +210,41 @@ class NotebookLMGenerator:
 
     def _generate_all_materials(self, split_content):
         """Generate all learning materials."""
-        topics = split_content.topics
+        import traceback
 
-        # Set up generators
-        handout_gen = HandoutGenerator(self.notebooklm, self.gemini, self.downloader)
-        cheatsheet_gen = CheatsheetGenerator(self.notebooklm, self.gemini, self.downloader)
-        mindmap_gen = MindmapGenerator(self.notebooklm, self.gemini, self.downloader)
-        audiobook_gen = AudiobookGenerator(self.notebooklm, self.gemini, self.downloader)
-        story_gen = StoryGenerator(self.gemini, self.downloader)
-        strategy_gen = StrategyGenerator(self.gemini, self.downloader)
-        flashcard_gen = FlashcardGenerator(self.notebooklm, self.gemini, self.downloader)
-        quiz_gen = QuizGenerator(self.gemini, self.notebooklm, self.downloader)
-        discussion_gen = DiscussionGenerator(self.gemini, self.notebooklm, self.downloader)
+        self.logger.info("Starting material generation...")
+        self.logger.debug(f"NotebookLM client: {self.notebooklm}")
+        self.logger.debug(f"Gemini client: {self.gemini}")
+
+        topics = split_content.topics
+        self.logger.info(f"Processing {len(topics)} topics")
+
+        # Set up generators with error handling
+        try:
+            self.logger.debug("Initializing generators...")
+            handout_gen = HandoutGenerator(self.notebooklm, self.gemini, self.downloader)
+            cheatsheet_gen = CheatsheetGenerator(self.notebooklm, self.gemini, self.downloader)
+            mindmap_gen = MindmapGenerator(self.notebooklm, self.gemini, self.downloader)
+            audiobook_gen = AudiobookGenerator(self.notebooklm, self.gemini, self.downloader)
+        except Exception as e:
+            self.logger.error(f"Failed to initialize generators: {e}")
+            self.logger.error(traceback.format_exc())
+            return
+        try:
+            story_gen = StoryGenerator(self.gemini, self.downloader)
+            strategy_gen = StrategyGenerator(self.gemini, self.downloader)
+            flashcard_gen = FlashcardGenerator(self.notebooklm, self.gemini, self.downloader)
+            quiz_gen = QuizGenerator(self.gemini, self.notebooklm, self.downloader)
+            discussion_gen = DiscussionGenerator(self.gemini, self.notebooklm, self.downloader)
+            self.logger.debug("All generators initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize remaining generators: {e}")
+            self.logger.error(traceback.format_exc())
+            return
 
         # Generate for each topic
-        for topic in topics:
+        for topic_idx, topic in enumerate(topics):
+            self.logger.info(f"\n--- Processing topic {topic_idx + 1}/{len(topics)} ---")
             self.logger.info(f"\n{'='*40}")
             self.logger.info(f"Processing Topic {topic.id}: {topic.title}")
             self.logger.info(f"{'='*40}")
@@ -236,16 +256,24 @@ class NotebookLMGenerator:
             )
             video_ok = False
             try:
+                self.logger.debug(f"NotebookLM client exists: {self.notebooklm is not None}")
                 if self.notebooklm:
+                    self.logger.debug("Creating notebook...")
                     self.notebooklm.create_notebook(topic.title)
+                    self.logger.debug("Adding text source...")
                     src_ok = self.notebooklm.add_text_source(topic.content, topic.title)
                     if src_ok:
+                        self.logger.debug("Generating audio overview...")
                         gen_ok = self.notebooklm.generate_audio_overview()
                         video_ok = bool(gen_ok)
+                        self.logger.debug(f"Audio generation result: {gen_ok}")
                     else:
                         self.logger.warning("Add source step did not complete successfully; skipping audio generation")
+                else:
+                    self.logger.warning("NotebookLM client is None, skipping video generation")
             except Exception as e:
-                self.logger.warning(f"Video generation failed for {topic.title}: {e}")
+                self.logger.error(f"Video generation failed for {topic.title}: {e}")
+                self.logger.error(traceback.format_exc())
                 video_ok = False
 
             if video_ok:

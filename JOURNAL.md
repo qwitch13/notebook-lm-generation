@@ -105,6 +105,15 @@
 - [x] CLI interface: status, guide, tasks, instructions, create
 - [x] Created AGENTS.md with comprehensive collaboration documentation
 
+#### Phase 13: Debug Logging and Error Handling (2025-12-07)
+- [x] Added verbose debug logging throughout `main.py`
+- [x] Log traceback for all exceptions in video/content generation
+- [x] Added INFO-level logging of raw Gemini response in topic_splitter
+- [x] Log JSON parsing attempts with position info on failure
+- [x] Fixed error handling in `_generate_all_materials()` with proper try/except
+- [x] Added per-topic progress logging with topic index
+- [x] Created `current-instr.txt` for multi-agent collaboration instructions
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks

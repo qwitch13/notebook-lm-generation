@@ -2,6 +2,7 @@
 
 import time
 import os
+import traceback
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
@@ -69,7 +70,17 @@ class NotebookLMClient:
 
     def navigate_to_notebooklm(self) -> bool:
         """Navigate to NotebookLM homepage."""
-        return self.auth.navigate_to_notebooklm()
+        self.logger.debug("Navigating to NotebookLM homepage...")
+        try:
+            if not self.auth.navigate_to_notebooklm():
+                self.logger.error("self.auth.navigate_to_notebooklm() returned False")
+                return False
+            self.logger.debug(f"Driver URL after navigation attempt: {self.driver.current_url}")
+            return "notebooklm.google.com" in self.driver.current_url
+        except Exception as e:
+            self.logger.error(f"Exception in navigate_to_notebooklm: {e}")
+            self.logger.error(traceback.format_exc())
+            return False
 
     def create_notebook(self, name: str) -> NotebookProject:
         """
@@ -81,39 +92,63 @@ class NotebookLMClient:
         Returns:
             NotebookProject instance
         """
-        self.logger.info(f"Creating new notebook: {name}")
-
+        self.logger.info(f"Attempting to create new notebook: {name}")
         try:
-            # Navigate to NotebookLM if not already there
-            if "notebooklm" not in self.driver.current_url.lower():
-                self.navigate_to_notebooklm()
+            # Check driver status before starting
+            if not self.driver or not self.driver.window_handles:
+                self.logger.error("WebDriver is not available or has been closed.")
+                # Try to re-initialize driver
+                self.logger.info("Attempting to re-initialize WebDriver...")
+                self.driver = self.auth.get_driver(force_recreate=True)
+                if not self.driver:
+                    self.logger.error("Failed to re-initialize WebDriver.")
+                    raise Exception("WebDriver re-initialization failed.")
 
+            self.logger.debug(f"Driver status OK. Current URL: {self.driver.current_url}")
+
+            # Navigate to NotebookLM if not already there
+            if "notebooklm.google.com" not in self.driver.current_url.lower():
+                self.logger.info("Not on NotebookLM page, navigating...")
+                if not self.navigate_to_notebooklm():
+                    self.logger.error("Failed to navigate to NotebookLM. Aborting notebook creation.")
+                    # Fallback to manual creation as a last resort
+                    return self._manual_notebook_creation(name)
+
+            self.logger.debug(f"On NotebookLM page. Current URL: {self.driver.current_url}")
             time.sleep(3)
 
             # Try to click create new notebook button
             try:
+                self.logger.debug("Attempting to click 'new notebook' button...")
                 self._click_element(self.SELECTORS["new_notebook_btn"], timeout=15)
                 time.sleep(2)
+                self.logger.info("Successfully clicked 'new notebook' button.")
             except TimeoutException:
-                # Button not found - ask user to create manually
+                self.logger.warning("Button 'new notebook' not found. Switching to manual creation.")
                 return self._manual_notebook_creation(name)
 
             # Set notebook title if input is available
             try:
+                self.logger.debug("Attempting to find and set notebook title...")
                 title_input = self._find_element(self.SELECTORS["notebook_title_input"])
                 if title_input:
                     title_input.clear()
                     title_input.send_keys(name)
                     title_input.send_keys(Keys.RETURN)
                     time.sleep(1)
-            except Exception:
-                self.logger.debug("Could not set notebook title directly")
+                    self.logger.info(f"Set notebook title to '{name}'.")
+                else:
+                    self.logger.debug("Notebook title input not found, may be created automatically.")
+            except Exception as e:
+                self.logger.warning(f"Could not set notebook title directly: {e}")
 
             # Verify notebook interface is available; otherwise ask for manual creation
             try:
+                self.logger.debug("Waiting for notebook interface to become available...")
                 WebDriverWait(self.driver, 20).until(
                     lambda d: self._has_notebook_interface(d)
                 )
+                self.logger.info("Notebook interface is now available.")
             except Exception:
                 self.logger.warning("Notebook interface not detected after creation click; switching to manual flow")
                 return self._manual_notebook_creation(name)
@@ -123,11 +158,12 @@ class NotebookLMClient:
                 url=self.driver.current_url
             )
 
-            self.logger.info(f"Created notebook: {name}")
+            self.logger.info(f"Successfully created notebook: {self.current_notebook.name}")
             return self.current_notebook
 
         except Exception as e:
-            self.logger.error(f"Failed to create notebook: {e}")
+            self.logger.error(f"FATAL: An unexpected error occurred in create_notebook: {e}")
+            self.logger.error(traceback.format_exc())
             # Fall back to manual creation
             return self._manual_notebook_creation(name)
 
@@ -153,16 +189,14 @@ class NotebookLMClient:
         initial_url = self.driver.current_url
         try:
             WebDriverWait(self.driver, 120).until(
-                lambda d: d.current_url != initial_url or
-                          "notebook" in d.current_url.lower() or
-                          self._has_notebook_interface(d)
+                lambda d: d.current_url != initial_url and "notebook" in d.current_url.lower()
             )
-            self.logger.info("Notebook created successfully!")
+            self.logger.info("Notebook URL changed, assuming manual creation was successful.")
         except TimeoutException:
-            self.logger.warning("Timeout waiting for notebook creation, continuing anyway...")
+            self.logger.warning("Timeout waiting for manual notebook creation, continuing anyway...")
 
         self.current_notebook = NotebookProject(
-            name=name,
+            name=self.get_notebook_title() or name,
             url=self.driver.current_url
         )
         return self.current_notebook
@@ -175,18 +209,19 @@ class NotebookLMClient:
                 self.SELECTORS["add_source_btn"],
                 self.SELECTORS["chat_input"],
                 "[data-test-id='notebook-view']",
-                "[data-test-id='notebook']",
-                ".notebook-content",
             ]
             for selector in selectors:
                 for sel in selector.split(", "):
                     try:
-                        driver.find_element(By.CSS_SELECTOR, sel.strip())
-                        return True
+                        if driver.find_element(By.CSS_SELECTOR, sel.strip()).is_displayed():
+                            self.logger.debug(f"Found notebook interface element: {sel.strip()}")
+                            return True
                     except NoSuchElementException:
                         continue
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"Exception while checking for notebook interface: {e}")
             pass
+        self.logger.debug("Could not find any notebook interface elements.")
         return False
 
     def _manual_add_source(self, text: str, title: str) -> bool:
@@ -310,6 +345,7 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to add text source automatically: {e}")
+            self.logger.error(traceback.format_exc())
             return self._manual_add_source(text, title)
 
     def add_file_source(self, file_path: Path) -> bool:
@@ -355,6 +391,7 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to add file source: {e}")
+            self.logger.error(traceback.format_exc())
             return False
 
     def add_website_source(self, url: str) -> bool:
@@ -403,6 +440,7 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to add website source: {e}")
+            self.logger.error(traceback.format_exc())
             return False
 
     def generate_audio_overview(self) -> bool:
@@ -445,6 +483,7 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to generate audio overview automatically: {e}")
+            self.logger.error(traceback.format_exc())
             ok = self._manual_generate_audio()
             if ok:
                 audio_el = self._find_element(self.SELECTORS["audio_player"], timeout=5)
@@ -499,6 +538,7 @@ class NotebookLMClient:
 
         except Exception as e:
             self.logger.error(f"Failed to send chat message: {e}")
+            self.logger.error(traceback.format_exc())
             return None
 
     def generate_study_guide(self) -> Optional[str]:
@@ -691,4 +731,5 @@ class NotebookLMClient:
             return True
         except Exception as e:
             self.logger.error(f"Failed to download audio: {e}")
+            self.logger.error(traceback.format_exc())
             return False
