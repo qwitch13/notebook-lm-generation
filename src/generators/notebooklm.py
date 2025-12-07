@@ -39,14 +39,14 @@ class NotebookLMClient:
     SELECTORS = {
         "new_notebook_btn": "button.create-new-notebook-button, [data-test-id='create-notebook-button'], button[aria-label*='new notebook'], button[aria-label*='New notebook'], button[aria-label*='Create'], .create-button, button.mdc-button--raised, button[jsname]",
         "notebook_title_input": "[data-test-id='notebook-title'], input[placeholder*='title'], input[aria-label*='title'], .notebook-title-input",
-        "add_source_btn": "button[aria-label*='Add source'], button[aria-label*='add source'], [data-test-id='add-source-button'], .add-source-button, button.source-button",
+        "add_source_btn": "button[aria-label*='Add source'], button[aria-label*='add source'], [data-test-id='add-source-button'], .add-source-button, button.source-button, [aria-label='Add source']",
         "upload_file_option": "[data-test-id='upload-file'], [aria-label*='Upload'], [aria-label*='upload'], .upload-option, button[aria-label*='file']",
         "file_input": "input[type='file']",
         "paste_text_option": "[data-test-id='paste-text'], [aria-label*='Paste text'], [aria-label*='paste'], [aria-label*='Copied text'], .paste-text-option",
         "text_input": "textarea[placeholder*='Paste'], textarea[aria-label*='text'], .text-input-area, textarea",
         "website_option": "[data-test-id='website-url'], [aria-label*='Website'], [aria-label*='website'], [aria-label*='URL'], .website-option",
         "url_input": "input[placeholder*='URL'], input[type='url'], input[aria-label*='URL']",
-        "generate_audio_btn": "button[aria-label*='Audio Overview'], button[aria-label*='audio'], button[aria-label*='Generate'], [data-test-id='generate-audio'], .audio-overview-button",
+        "generate_audio_btn": "button[aria-label*='Audio Overview'], button[aria-label*='audio'], button[aria-label*='Generate'], [data-test-id='generate-audio'], .audio-overview-button, [data-test-id='audio-overview-generate']",
         "studio_tab": "[data-test-id='studio-tab'], [aria-label*='Studio'], button[aria-label*='Audio'], .studio-tab",
         "chat_input": "textarea[aria-label*='message'], textarea[placeholder*='Ask'], [data-test-id='chat-input'], .chat-input, textarea",
         "send_btn": "button[aria-label*='Send'], button[aria-label*='submit'], [data-test-id='send-button'], .send-button",
@@ -54,6 +54,8 @@ class NotebookLMClient:
         "download_btn": "button[aria-label*='Download'], [data-test-id='download'], .download-button",
         "audio_player": "audio, [data-test-id='audio-player']",
         "loading_indicator": "[data-test-id='loading'], .loading, .spinner, [role='progressbar']",
+        # Potential overlays/popups that can intercept clicks
+        "overlay": ".kPY6ve, [role='dialog'], [aria-modal='true'], .mdc-dialog__surface, .cdk-overlay-container, .modal-backdrop",
     }
 
     def __init__(self, authenticator: GoogleAuthenticator):
@@ -88,7 +90,7 @@ class NotebookLMClient:
 
             # Try to click create new notebook button
             try:
-                self._click_element(self.SELECTORS["new_notebook_btn"], timeout=5)
+                self._click_element(self.SELECTORS["new_notebook_btn"], timeout=15)
                 time.sleep(2)
             except TimeoutException:
                 # Button not found - ask user to create manually
@@ -488,7 +490,7 @@ class NotebookLMClient:
         )
 
     def _find_element(self, selector: str, timeout: int = 10, retries: int = 2):
-        """Find element using multiple selector strategies with stale element retry."""
+        """Find element using multiple selector strategies with visibility and stale element retry."""
         from selenium.common.exceptions import StaleElementReferenceException
 
         selectors = selector.split(", ")
@@ -496,8 +498,9 @@ class NotebookLMClient:
         for attempt in range(retries):
             for sel in selectors:
                 try:
-                    element = WebDriverWait(self.driver, timeout // len(selectors)).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, sel.strip()))
+                    wait_time = max(1, timeout // max(1, len(selectors)))
+                    element = WebDriverWait(self.driver, wait_time).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, sel.strip()))
                     )
                     # Verify element is not stale by accessing a property
                     _ = element.is_displayed()
@@ -511,20 +514,65 @@ class NotebookLMClient:
 
         return None
 
+    def _scroll_into_view(self, element):
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", element)
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+    def _dismiss_overlays(self):
+        """Try to dismiss blocking overlays/popups that intercept clicks."""
+        try:
+            # Press ESC to close dialogs
+            from selenium.webdriver.common.keys import Keys
+            self.driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+        try:
+            overlays = self.driver.find_elements(By.CSS_SELECTOR, self.SELECTORS["overlay"])  # type: ignore[index]
+            for ov in overlays:
+                try:
+                    if ov.is_displayed():
+                        self.driver.execute_script("arguments[0].style.display='none'", ov)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     def _click_element(self, selector: str, timeout: int = 10, retries: int = 2):
-        """Click an element, trying multiple selectors with stale element retry."""
-        from selenium.common.exceptions import StaleElementReferenceException
+        """Click an element robustly: wait, scroll, regular click, then JS click fallback, handling interceptions."""
+        from selenium.common.exceptions import StaleElementReferenceException, ElementClickInterceptedException
 
         selectors = selector.split(", ")
 
         for attempt in range(retries):
             for sel in selectors:
                 try:
-                    element = WebDriverWait(self.driver, timeout // len(selectors)).until(
+                    wait_time = max(1, timeout // max(1, len(selectors)))
+                    element = WebDriverWait(self.driver, wait_time).until(
                         EC.element_to_be_clickable((By.CSS_SELECTOR, sel.strip()))
                     )
-                    element.click()
-                    return True
+
+                    # Scroll into view before clicking
+                    self._scroll_into_view(element)
+
+                    try:
+                        element.click()
+                        return True
+                    except ElementClickInterceptedException:
+                        # Try to dismiss overlays and JS-click
+                        self._dismiss_overlays()
+                        self._scroll_into_view(element)
+                        try:
+                            self.driver.execute_script("arguments[0].click();", element)
+                            return True
+                        except Exception:
+                            # Small wait and retry within same attempt
+                            time.sleep(0.5)
+                            continue
                 except StaleElementReferenceException:
                     self.logger.debug(f"Stale element on click, retrying... ({attempt + 1}/{retries})")
                     time.sleep(0.5)

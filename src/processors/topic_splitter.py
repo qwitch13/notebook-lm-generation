@@ -124,6 +124,7 @@ Return ONLY valid JSON, no additional text."""
                 generation_config=genai.GenerationConfig(
                     temperature=0.3,
                     max_output_tokens=8000,
+                    response_mime_type="application/json",
                 )
             )
 
@@ -133,6 +134,10 @@ Return ONLY valid JSON, no additional text."""
             # Clean up response - extract JSON from markdown code blocks or other text
             result_text = self._extract_json(result_text)
             result = json.loads(result_text)
+
+            if not isinstance(result, dict):
+                self.logger.warning("Gemini returned non-object JSON; using fallback splitter")
+                return self._fallback_split(content, max_topics)
 
             # Create Topic objects
             topics = []
@@ -266,6 +271,19 @@ Return ONLY valid JSON, no additional text."""
 
         if first_brace != -1 and last_brace > first_brace:
             text = text[first_brace:last_brace + 1]
+        else:
+            # Handle responses that start with keys but no outer braces
+            # e.g., \n    "overview": "..."\n    "topics": [...]
+            key_line = re.search(r'"overview"\s*:', text) or re.search(r'\boverview\b\s*:', text)
+            topics_line = re.search(r'"topics"\s*:', text) or re.search(r'\btopics\b\s*:', text)
+            if key_line or topics_line:
+                # Attempt to wrap content in braces
+                # Remove any leading commas/newlines
+                body = text.strip().lstrip(",")
+                # Ensure proper comma separation between top-level fields
+                body = re.sub(r"\n\s*(\"[a-zA-Z_]+\"\s*:)", r", \1", body)
+                body = body.lstrip(', ')
+                text = "{" + body + "}"
 
         # Strip internal whitespace issues - normalize newlines
         # This fixes the '\n    "overview"' error
