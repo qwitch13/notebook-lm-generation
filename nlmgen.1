@@ -1,0 +1,170 @@
+.\" Man page for nlmgen
+.TH NLMGEN 1 "December 2025" "nlmgen 1.0.0" "User Commands"
+.SH NAME
+nlmgen \- NotebookLM Generation Tool for automated learning material creation
+.SH SYNOPSIS
+.B nlmgen
+.I input
+.RB [ \-e
+.IR email ]
+.RB [ \-p
+.IR password ]
+.RB [ \-o
+.IR output ]
+.RB [ \-\-api\-key
+.IR key ]
+.RB [ \-\-headless ]
+.RB [ \-v ]
+.SH DESCRIPTION
+.B nlmgen
+is an automated tool that generates comprehensive learning materials from educational content using Google's Gemini AI and NotebookLM.
+.PP
+It takes a PDF, TXT file, or website URL as input and generates:
+.IP \(bu 2
+Video summaries via NotebookLM Audio Overview
+.IP \(bu 2
+Handouts with keypoint summaries
+.IP \(bu 2
+Cheatsheets for quick reference
+.IP \(bu 2
+Mindmaps in Mermaid diagram format
+.IP \(bu 2
+Audiobook chapter scripts
+.IP \(bu 2
+Fantasy and Sci-Fi stories that teach the concepts
+.IP \(bu 2
+Learning strategy papers for exam preparation
+.IP \(bu 2
+Flashcards (Karteikarten) in Markdown and Anki format
+.IP \(bu 2
+Quizzes with answer keys
+.IP \(bu 2
+Podium discussions with 3 participants
+.SH OPTIONS
+.TP
+.I input
+Input file path (PDF, TXT) or website URL to process. Required.
+.TP
+.BR \-e ", " \-\-email " " \fIemail\fR
+Google account email for authentication.
+.TP
+.BR \-p ", " \-\-password " " \fIpassword\fR
+Google account password. Use single quotes around passwords with special characters:
+.BR "\-p 'my!password'" .
+.TP
+.BR \-o ", " \-\-output " " \fIdirectory\fR
+Output directory for generated files. Defaults to a folder named \fI<input>_output\fR in the same directory as the input file.
+.TP
+.BR \-\-api\-key " " \fIkey\fR
+Gemini API key. Can also be set via the GEMINI_API_KEY environment variable.
+.TP
+.B \-\-headless
+Run the browser in headless mode (no visible window). Not recommended when 2FA or passkey verification is required.
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose output with additional debug information.
+.TP
+.BR \-h ", " \-\-help
+Display help message and exit.
+.SH AUTHENTICATION
+The tool requires a Google account to access NotebookLM and Gemini services. When running for the first time:
+.IP 1. 3
+Enter your Google email and password
+.IP 2. 3
+A browser window will open for login
+.IP 3. 3
+Complete any 2FA, passkey, or fingerprint verification in the browser
+.IP 4. 3
+The tool will continue automatically after verification
+.PP
+Session cookies are saved to
+.I ~/.notebook_lm_gen/
+for subsequent runs.
+.SH OUTPUT STRUCTURE
+Generated files are organized in subdirectories:
+.PP
+.nf
+<input>_output/
+\(ti\(ti videos/           # NotebookLM generated videos
+\(ti\(ti handouts/         # Summary handouts
+\(ti\(ti cheatsheets/      # Quick reference sheets
+\(ti\(ti mindmaps/         # Mermaid diagram mindmaps
+\(ti\(ti audiobooks/       # Narration scripts
+\(ti\(ti stories/          # Fantasy & Sci-Fi stories
+\(ti\(ti strategies/       # Learning strategy papers
+\(ti\(ti flashcards/       # Markdown flashcards
+\(ti\(ti anki/             # Anki deck files (.apkg, .txt)
+\(ti\(ti quizzes/          # Quiz files with answer keys
+\(ti\(ti discussions/      # Podium discussion scripts
+\(ti\(ti notebook_lm_generation.log
+.fi
+.SH PROGRESS REPORTING
+The tool displays progress updates every 15 seconds showing:
+.IP \(bu 2
+Current processing step
+.IP \(bu 2
+Completed vs total steps
+.IP \(bu 2
+Elapsed time
+.IP \(bu 2
+Status of each generation task
+.SH EXAMPLES
+Process a PDF file with Google authentication:
+.PP
+.nf
+.RS
+nlmgen document.pdf -e user@gmail.com -p 'password123!'
+.RE
+.fi
+.PP
+Process a website with API key:
+.PP
+.nf
+.RS
+nlmgen https://example.com/article --api-key YOUR_API_KEY
+.RE
+.fi
+.PP
+Process a text file with custom output directory:
+.PP
+.nf
+.RS
+nlmgen notes.txt -o ~/study_materials/
+.RE
+.fi
+.SH ENVIRONMENT
+.TP
+.B GEMINI_API_KEY
+Gemini API key for content generation. Get one from https://makersuite.google.com/app/apikey
+.SH FILES
+.TP
+.I ~/.notebook_lm_gen/google_cookies.pkl
+Saved session cookies for Google authentication.
+.TP
+.I <install_dir>/.env
+Configuration file for API keys and settings.
+.SH EXIT STATUS
+.TP
+.B 0
+Successful completion.
+.TP
+.B 1
+An error occurred during processing.
+.SH NOTES
+.IP \(bu 2
+NotebookLM does not have an official API; the tool uses browser automation.
+.IP \(bu 2
+Audio/video generation can take several minutes per topic.
+.IP \(bu 2
+Passkey or 2FA verification must be completed manually in the browser.
+.IP \(bu 2
+The browser remains open after completion with Gemini loaded.
+.SH BUGS
+Report bugs at: https://github.com/qwitch13/notebook-lm-generation/issues
+.SH AUTHOR
+Written with assistance from Claude AI.
+.SH COPYRIGHT
+MIT License. See LICENSE file for details.
+.SH SEE ALSO
+.BR python3 (1),
+.BR chrome (1)

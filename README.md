@@ -24,6 +24,8 @@ This tool takes educational content (PDF, TXT, or website) and automatically gen
 - **Automatic topic splitting** using AI
 - **Anki deck generation** (.apkg format)
 - **Opens Gemini** at the end for additional interaction
+- **System-wide `nlmgen` command** - run from anywhere
+- **Man page** - comprehensive documentation via `man nlmgen`
 
 ## Installation
 
@@ -38,12 +40,19 @@ This tool takes educational content (PDF, TXT, or website) and automatically gen
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/notebook-lm-generation.git
+git clone https://github.com/qwitch13/notebook-lm-generation.git
 cd notebook-lm-generation
 
-# Run the install script
+# Run the install script (installs nlmgen command system-wide)
 ./install.sh
 ```
+
+The install script will:
+1. Create a Python virtual environment
+2. Install all dependencies
+3. Create the `.env` configuration file
+4. Install the `nlmgen` command to `/usr/local/bin`
+5. Install the man page
 
 ### Manual Installation
 
@@ -55,25 +64,32 @@ source venv/bin/activate  # Linux/macOS
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Install Chrome WebDriver (optional - webdriver-manager handles this)
-# brew install chromedriver  # macOS
-# apt-get install chromium-chromedriver  # Ubuntu
 ```
+
+### Uninstallation
+
+```bash
+# Run the uninstall script
+./uninstall.sh
+```
+
+This will remove the `nlmgen` command and man page. You can optionally remove the virtual environment, configuration, and saved cookies.
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the project root:
+The install script creates a `.env` file. Edit it to add your API key:
+
+```bash
+nano .env
+```
 
 ```env
 # Required for full functionality
 GEMINI_API_KEY=your_gemini_api_key
 
 # Optional
-GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret
 HEADLESS_BROWSER=false
 LOG_LEVEL=INFO
 ```
@@ -88,35 +104,36 @@ LOG_LEVEL=INFO
 
 ### Basic Usage
 
+After installation, the `nlmgen` command is available system-wide:
+
 ```bash
 # Process a PDF file
-python -m src.main document.pdf
+nlmgen document.pdf
 
 # Process a text file
-python -m src.main notes.txt
+nlmgen notes.txt
 
 # Process a website
-python -m src.main https://example.com/article
+nlmgen https://example.com/article
 ```
 
 ### With Authentication
 
 ```bash
-# With Google account credentials
-python -m src.main document.pdf -e your.email@gmail.com -p your_password
+# With Google account credentials (use single quotes for passwords with special characters!)
+nlmgen document.pdf -e your.email@gmail.com -p 'your_password!'
 
 # With Gemini API key
-python -m src.main document.pdf --api-key YOUR_API_KEY
+nlmgen document.pdf --api-key YOUR_API_KEY
 ```
 
-### Additional Options
+### Full Example
 
 ```bash
-python -m src.main document.pdf \
+nlmgen document.pdf \
     -e email@gmail.com \
-    -p password \
+    -p 'my!complex_password' \
     -o ./output_folder \
-    --headless \
     --api-key YOUR_API_KEY \
     -v  # verbose mode
 ```
@@ -127,11 +144,37 @@ python -m src.main document.pdf \
 |----------|-------------|
 | `input` | Input file path (PDF, TXT) or URL |
 | `-e, --email` | Google account email |
-| `-p, --password` | Google account password |
+| `-p, --password` | Google account password (use single quotes for special chars) |
 | `-o, --output` | Output directory |
 | `--headless` | Run browser in headless mode |
 | `--api-key` | Gemini API key |
 | `-v, --verbose` | Enable verbose output |
+| `-h, --help` | Show help message |
+
+### Getting Help
+
+```bash
+# Command line help
+nlmgen --help
+
+# Man page (detailed documentation)
+man nlmgen
+```
+
+## Authentication & 2FA
+
+When logging in with Google credentials:
+
+1. A browser window will open
+2. Enter your email (automated)
+3. Enter your password (automated)
+4. **If 2FA/passkey is required**: Complete verification manually in the browser
+   - Touch ID / fingerprint
+   - Security key
+   - Authenticator app code
+5. The tool will detect completion and continue automatically
+
+The tool waits up to 2 minutes for manual verification.
 
 ## Output Structure
 
@@ -171,10 +214,11 @@ The tool displays progress updates every 15 seconds showing:
 - Try running without `--headless` first
 - Check if Chrome is up to date
 
-**Login fails:**
-- Verify email and password are correct
-- You may need to complete 2FA manually
-- Try disabling "Less secure app access" warnings
+**Login fails / 2FA timeout:**
+- Use single quotes around passwords with special characters: `-p 'pass!word'`
+- Complete 2FA verification within 2 minutes
+- Don't use `--headless` when 2FA is required
+- Check the browser window for verification prompts
 
 **API errors:**
 - Verify your Gemini API key is valid
@@ -185,6 +229,10 @@ The tool displays progress updates every 15 seconds showing:
 - NotebookLM UI may change - selectors might need updating
 - Some features require manual interaction
 - Audio generation can take several minutes
+
+**Command not found after install:**
+- Make sure `/usr/local/bin` is in your PATH
+- Try: `export PATH="/usr/local/bin:$PATH"`
 
 ### Logs
 
@@ -208,8 +256,10 @@ notebook-lm-generation/
 │   ├── utils/               # Utilities
 │   └── config/              # Configuration
 ├── tests/                   # Test files
+├── nlmgen.1                 # Man page source
+├── install.sh               # Installation script
+├── uninstall.sh             # Uninstallation script
 ├── requirements.txt
-├── install.sh
 └── README.md
 ```
 
@@ -231,7 +281,7 @@ pytest tests/
 
 - Never commit credentials to version control
 - Use environment variables for sensitive data
-- The tool stores cookies locally for session persistence
+- The tool stores cookies locally (`~/.notebook_lm_gen/`) for session persistence
 - Consider using a separate Google account for automation
 
 ## License
@@ -247,4 +297,5 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-For issues and feature requests, please use the GitHub issue tracker.
+For issues and feature requests, please use the GitHub issue tracker:
+- https://github.com/qwitch13/notebook-lm-generation/issues
