@@ -63,7 +63,7 @@ class GeminiClient:
             api_key = api_key or self.settings.gemini_api_key
             if api_key:
                 genai.configure(api_key=api_key)
-                self.api_model = genai.GenerativeModel("gemini-1.5-pro")
+                self.api_model = genai.GenerativeModel("gemini-2.0-flash")
                 self.logger.info("Initialized Gemini API client")
 
         # Initialize browser if needed
@@ -113,7 +113,7 @@ class GeminiClient:
 
             return GeminiResponse(
                 text=response.text,
-                model="gemini-1.5-pro",
+                model="gemini-2.0-flash",
                 finish_reason=str(response.candidates[0].finish_reason) if response.candidates else ""
             )
 

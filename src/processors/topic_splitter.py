@@ -92,7 +92,7 @@ Return ONLY valid JSON, no additional text."""
             api_key = api_key or self.settings.gemini_api_key
             if api_key:
                 genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel("gemini-1.5-flash")
+                self.model = genai.GenerativeModel("gemini-2.0-flash")
             else:
                 self.logger.warning("No Gemini API key provided")
                 self.model = None

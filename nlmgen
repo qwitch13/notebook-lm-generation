@@ -1,0 +1,9 @@
+#!/bin/bash
+# nlmgen - NotebookLM Generation Tool
+# Wrapper script to run the tool from anywhere
+
+NLMGEN_HOME="/Users/qwitch13/IdeaProjects/notebook-lm-generation"
+
+# Activate virtual environment and run
+source "${NLMGEN_HOME}/venv/bin/activate"
+python -m src.main "$@"

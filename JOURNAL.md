@@ -65,6 +65,11 @@
 - [x] Credentials are loaded automatically on future runs
 - [x] Priority: CLI args > env vars > saved config
 
+#### Phase 8: Gemini Model Update (2025-12-07)
+- [x] Fixed 404 error: `gemini-1.5-pro` model no longer available in v1beta API
+- [x] Updated to `gemini-2.0-flash` model in gemini_client.py and topic_splitter.py
+- [x] Verified model works (rate limit error confirms model exists)
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks
