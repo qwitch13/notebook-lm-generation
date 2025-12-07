@@ -147,11 +147,11 @@ class NotebookLMGenerator:
                 headless=self.headless
             )
 
-            if self.email and self.password:
-                success = self.authenticator.login_google()
-                if not success:
-                    self.progress.fail_step(ProcessingStep.AUTHENTICATION, "Login failed")
-                    return False
+            # Always attempt login - it will use saved session or prompt for manual login
+            success = self.authenticator.login_google()
+            if not success:
+                self.progress.fail_step(ProcessingStep.AUTHENTICATION, "Login failed")
+                return False
 
             # Initialize clients
             self.notebooklm = NotebookLMClient(self.authenticator)

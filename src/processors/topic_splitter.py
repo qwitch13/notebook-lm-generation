@@ -130,14 +130,8 @@ Return ONLY valid JSON, no additional text."""
             # Parse JSON response
             result_text = response.text.strip()
 
-            # Clean up response if needed
-            if result_text.startswith("```json"):
-                result_text = result_text[7:]
-            if result_text.startswith("```"):
-                result_text = result_text[3:]
-            if result_text.endswith("```"):
-                result_text = result_text[:-3]
-
+            # Clean up response - extract JSON from markdown code blocks or other text
+            result_text = self._extract_json(result_text)
             result = json.loads(result_text)
 
             # Create Topic objects
@@ -239,6 +233,30 @@ Return ONLY valid JSON, no additional text."""
             total_topics=len(topics),
             overview=f"Content split into {len(topics)} parts based on structure."
         )
+
+    def _extract_json(self, text: str) -> str:
+        """Extract JSON from text that may contain markdown or other content."""
+        # Remove markdown code blocks
+        if "```json" in text:
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end > start:
+                return text[start:end].strip()
+
+        if "```" in text:
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end > start:
+                return text[start:end].strip()
+
+        # Try to find JSON object boundaries
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+
+        if first_brace != -1 and last_brace > first_brace:
+            return text[first_brace:last_brace + 1]
+
+        return text.strip()
 
     def _extract_keywords(self, text: str, max_keywords: int = 5) -> list[str]:
         """Extract simple keywords from text."""

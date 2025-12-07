@@ -99,27 +99,50 @@ class GeminiClient:
         self,
         prompt: str,
         temperature: float,
-        max_tokens: int
+        max_tokens: int,
+        max_retries: int = 3
     ) -> Optional[GeminiResponse]:
-        """Generate using the Gemini API."""
-        try:
-            response = self.api_model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
+        """Generate using the Gemini API with retry logic for rate limits."""
+        for attempt in range(max_retries):
+            try:
+                response = self.api_model.generate_content(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=temperature,
+                        max_output_tokens=max_tokens,
+                    )
                 )
-            )
 
-            return GeminiResponse(
-                text=response.text,
-                model="gemini-2.0-flash",
-                finish_reason=str(response.candidates[0].finish_reason) if response.candidates else ""
-            )
+                return GeminiResponse(
+                    text=response.text,
+                    model="gemini-2.0-flash",
+                    finish_reason=str(response.candidates[0].finish_reason) if response.candidates else ""
+                )
 
-        except Exception as e:
-            self.logger.error(f"Gemini API error: {e}")
-            return None
+            except Exception as e:
+                error_str = str(e)
+                # Check for rate limit errors (429)
+                if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                    # Extract retry delay if provided
+                    retry_delay = 60  # Default to 60 seconds
+                    if "retry in" in error_str.lower():
+                        import re
+                        match = re.search(r'retry in (\d+)', error_str.lower())
+                        if match:
+                            retry_delay = int(match.group(1)) + 5  # Add buffer
+
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"Rate limited. Waiting {retry_delay}s before retry {attempt + 2}/{max_retries}...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        self.logger.error(f"Rate limit exceeded after {max_retries} attempts")
+                        return None
+                else:
+                    self.logger.error(f"Gemini API error: {e}")
+                    return None
+
+        return None
 
     def _generate_via_browser(self, prompt: str) -> Optional[GeminiResponse]:
         """Generate using the Gemini web interface."""

@@ -142,20 +142,16 @@ class GoogleAuthenticator:
         """
         Log into Google account.
 
+        Opens the browser and lets the user log in manually.
+        Waits for successful login before continuing.
+
         Args:
-            email: Google account email (uses instance email if not provided)
-            password: Google account password (uses instance password if not provided)
+            email: Google account email (not used - for manual login)
+            password: Google account password (not used - for manual login)
 
         Returns:
             True if login successful, False otherwise
         """
-        email = email or self.email
-        password = password or self.password
-
-        if not email or not password:
-            self.logger.error("Email and password are required for login")
-            return False
-
         driver = self.get_driver()
 
         try:
@@ -169,69 +165,83 @@ class GoogleAuthenticator:
                     self.logger.info("Successfully logged in using saved session")
                     return True
 
-            # Navigate to Google Sign In
-            self.logger.info("Logging into Google account...")
+            # Navigate to Google Sign In for manual login
+            self.logger.info("=" * 50)
+            self.logger.info("MANUAL LOGIN REQUIRED")
+            self.logger.info("Please log into your Google account in the browser window")
+            self.logger.info("Waiting up to 3 minutes for login...")
+            self.logger.info("=" * 50)
+
             driver.get("https://accounts.google.com/signin")
             time.sleep(2)
 
-            # Enter email
-            email_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email']"))
-            )
-            email_input.clear()
-            email_input.send_keys(email)
-            email_input.send_keys(Keys.RETURN)
-            time.sleep(3)
+            # Wait for user to complete login manually
+            # Check for successful login indicators
+            try:
+                WebDriverWait(driver, 180).until(
+                    lambda d: self._check_login_success(d)
+                )
+            except TimeoutException:
+                self.logger.error("Login timed out after 3 minutes")
+                return False
 
-            # Enter password
-            password_input = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']"))
-            )
-            password_input.clear()
-            password_input.send_keys(password)
-            password_input.send_keys(Keys.RETURN)
-
-            # Give time for page to transition
-            time.sleep(5)
-
-            # Check for 2FA, passkey, or other verification
-            # This will wait up to 2 minutes for manual verification
-            self._handle_verification()
-
-            # Additional wait in case verification just completed
-            time.sleep(3)
+            # Give time for session to settle
+            time.sleep(2)
 
             # Verify login success
             if self._is_logged_in():
                 self._save_cookies()
                 self.logger.info("Successfully logged into Google account")
                 return True
-            else:
-                # One more check - maybe we're already on a Google page
-                current_url = driver.current_url
-                if any(domain in current_url for domain in ["google.com", "notebooklm", "gemini"]):
-                    if "signin" not in current_url and "accounts.google.com/v3" not in current_url:
-                        self._save_cookies()
-                        self.logger.info("Successfully logged into Google account")
-                        return True
 
-                self.logger.error("Login failed - could not verify logged in state")
-                return False
-
-        except TimeoutException as e:
-            # Check if we actually succeeded despite the timeout
-            try:
-                if self._is_logged_in():
+            # One more check - maybe we're already on a Google page
+            current_url = driver.current_url
+            if any(domain in current_url for domain in ["google.com", "notebooklm", "gemini"]):
+                if "signin" not in current_url and "accounts.google.com/v3" not in current_url:
                     self._save_cookies()
                     self.logger.info("Successfully logged into Google account")
                     return True
-            except Exception:
-                pass
-            self.logger.error(f"Login timeout: {e}")
+
+            self.logger.error("Login failed - could not verify logged in state")
             return False
+
         except Exception as e:
             self.logger.error(f"Login failed: {e}")
             return False
+
+    def _check_login_success(self, driver) -> bool:
+        """Check if login was successful by looking at the URL and page content."""
+        current_url = driver.current_url
+
+        # Success indicators - navigated away from signin
+        success_urls = [
+            "myaccount.google.com",
+            "mail.google.com",
+            "drive.google.com",
+            "notebooklm.google.com",
+            "gemini.google.com",
+            "accounts.google.com/b/",  # Account switcher (logged in)
+        ]
+
+        if any(url in current_url for url in success_urls):
+            return True
+
+        # Still on signin page - not done yet
+        if "accounts.google.com/signin" in current_url:
+            return False
+        if "accounts.google.com/v3/signin" in current_url:
+            return False
+
+        # Check if we're past the password step but on verification
+        page_source = driver.page_source.lower()
+        if "verify" in page_source or "2-step" in page_source or "passkey" in page_source:
+            return False
+
+        # Generic check - if we're on any google.com page that's not signin
+        if "google.com" in current_url and "signin" not in current_url:
+            return True
+
+        return False
 
     def _is_logged_in(self) -> bool:
         """Check if currently logged into Google."""

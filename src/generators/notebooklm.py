@@ -35,24 +35,25 @@ class NotebookLMClient:
     """
 
     # CSS Selectors (may need updates if NotebookLM UI changes)
+    # Updated 2025-12 for current NotebookLM interface
     SELECTORS = {
-        "new_notebook_btn": "[data-test-id='create-notebook-button'], button[aria-label*='Create'], .create-button",
-        "notebook_title_input": "[data-test-id='notebook-title'], input[placeholder*='title'], .notebook-title-input",
-        "add_source_btn": "[data-test-id='add-source-button'], button[aria-label*='Add source'], .add-source-button",
-        "upload_file_option": "[data-test-id='upload-file'], [aria-label*='Upload'], .upload-option",
+        "new_notebook_btn": "button.create-new-notebook-button, [data-test-id='create-notebook-button'], button[aria-label*='new notebook'], button[aria-label*='New notebook'], button[aria-label*='Create'], .create-button, button.mdc-button--raised, button[jsname]",
+        "notebook_title_input": "[data-test-id='notebook-title'], input[placeholder*='title'], input[aria-label*='title'], .notebook-title-input",
+        "add_source_btn": "button[aria-label*='Add source'], button[aria-label*='add source'], [data-test-id='add-source-button'], .add-source-button, button.source-button",
+        "upload_file_option": "[data-test-id='upload-file'], [aria-label*='Upload'], [aria-label*='upload'], .upload-option, button[aria-label*='file']",
         "file_input": "input[type='file']",
-        "paste_text_option": "[data-test-id='paste-text'], [aria-label*='Paste text'], .paste-text-option",
-        "text_input": "textarea[placeholder*='Paste'], .text-input-area",
-        "website_option": "[data-test-id='website-url'], [aria-label*='Website'], .website-option",
-        "url_input": "input[placeholder*='URL'], input[type='url']",
-        "generate_audio_btn": "[data-test-id='generate-audio'], button[aria-label*='Audio Overview'], .audio-overview-button",
-        "studio_tab": "[data-test-id='studio-tab'], [aria-label*='Studio'], .studio-tab",
-        "chat_input": "[data-test-id='chat-input'], textarea[placeholder*='Ask'], .chat-input",
-        "send_btn": "[data-test-id='send-button'], button[aria-label*='Send'], .send-button",
-        "response_container": "[data-test-id='response'], .response-container, .chat-response",
-        "download_btn": "[data-test-id='download'], button[aria-label*='Download'], .download-button",
+        "paste_text_option": "[data-test-id='paste-text'], [aria-label*='Paste text'], [aria-label*='paste'], [aria-label*='Copied text'], .paste-text-option",
+        "text_input": "textarea[placeholder*='Paste'], textarea[aria-label*='text'], .text-input-area, textarea",
+        "website_option": "[data-test-id='website-url'], [aria-label*='Website'], [aria-label*='website'], [aria-label*='URL'], .website-option",
+        "url_input": "input[placeholder*='URL'], input[type='url'], input[aria-label*='URL']",
+        "generate_audio_btn": "button[aria-label*='Audio Overview'], button[aria-label*='audio'], button[aria-label*='Generate'], [data-test-id='generate-audio'], .audio-overview-button",
+        "studio_tab": "[data-test-id='studio-tab'], [aria-label*='Studio'], button[aria-label*='Audio'], .studio-tab",
+        "chat_input": "textarea[aria-label*='message'], textarea[placeholder*='Ask'], [data-test-id='chat-input'], .chat-input, textarea",
+        "send_btn": "button[aria-label*='Send'], button[aria-label*='submit'], [data-test-id='send-button'], .send-button",
+        "response_container": "[data-test-id='response'], .response-container, .chat-response, .message-content",
+        "download_btn": "button[aria-label*='Download'], [data-test-id='download'], .download-button",
         "audio_player": "audio, [data-test-id='audio-player']",
-        "loading_indicator": "[data-test-id='loading'], .loading, .spinner",
+        "loading_indicator": "[data-test-id='loading'], .loading, .spinner, [role='progressbar']",
     }
 
     def __init__(self, authenticator: GoogleAuthenticator):

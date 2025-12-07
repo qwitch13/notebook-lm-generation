@@ -70,6 +70,14 @@
 - [x] Updated to `gemini-2.0-flash` model in gemini_client.py and topic_splitter.py
 - [x] Verified model works (rate limit error confirms model exists)
 
+#### Phase 9: Bug Fixes and Manual Login (2025-12-07)
+- [x] Fixed topic splitter JSON parsing - added `_extract_json()` to handle markdown code blocks
+- [x] Updated NotebookLM CSS selectors for current UI (2025-12)
+- [x] Added rate limit retry logic (3 retries with auto-wait based on API response)
+- [x] Changed to manual login mode - browser opens, user logs in themselves
+- [x] Login uses saved session cookies when available
+- [x] 3-minute timeout for manual login completion
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks
