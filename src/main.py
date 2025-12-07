@@ -392,6 +392,59 @@ class NotebookLMGenerator:
             pass
 
 
+def get_config_path() -> Path:
+    """Get the path to the config file."""
+    config_dir = Path.home() / ".config" / "nlmgen"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "config"
+
+
+def load_config() -> dict:
+    """Load the config file as a dictionary."""
+    config_path = get_config_path()
+    config = {}
+    if config_path.exists():
+        for line in config_path.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                key, value = line.split("=", 1)
+                config[key.strip()] = value.strip()
+    return config
+
+
+def save_config(config: dict) -> None:
+    """Save the config dictionary to file."""
+    config_path = get_config_path()
+    with open(config_path, "w") as f:
+        for key, value in config.items():
+            f.write(f"{key}={value}\n")
+
+
+def save_api_key(api_key: str) -> None:
+    """Save the Gemini API key to the config file."""
+    config = load_config()
+    config["GEMINI_API_KEY"] = api_key
+    save_config(config)
+
+
+def load_api_key() -> Optional[str]:
+    """Load the Gemini API key from the config file."""
+    return load_config().get("GEMINI_API_KEY")
+
+
+def save_user_credentials(email: str, password: str) -> None:
+    """Save Google user credentials to the config file."""
+    config = load_config()
+    config["GOOGLE_EMAIL"] = email
+    config["GOOGLE_PASSWORD"] = password
+    save_config(config)
+
+
+def load_user_credentials() -> tuple[Optional[str], Optional[str]]:
+    """Load Google user credentials from the config file."""
+    config = load_config()
+    return config.get("GOOGLE_EMAIL"), config.get("GOOGLE_PASSWORD")
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -400,6 +453,7 @@ def main():
 
     parser.add_argument(
         "input",
+        nargs="?",
         help="Input file path (PDF, TXT) or URL"
     )
 
@@ -435,22 +489,60 @@ def main():
         help="Verbose output"
     )
 
+    parser.add_argument(
+        "--add-key",
+        metavar="KEY",
+        help="Save Gemini API key to config file for future use"
+    )
+
+    parser.add_argument(
+        "--save-user",
+        action="store_true",
+        help="Save provided -e/--email and -p/--password to config file for future use"
+    )
+
     args = parser.parse_args()
 
+    # Handle --save-user option
+    if args.save_user:
+        if not args.email or not args.password:
+            parser.error("--save-user requires both -e/--email and -p/--password")
+        save_user_credentials(args.email, args.password)
+        print(f"Google credentials saved to {get_config_path()}")
+
+    # Handle --add-key option
+    if args.add_key:
+        save_api_key(args.add_key)
+        print(f"Gemini API key saved to {get_config_path()}")
+
+    # Exit early if only saving config (no input provided)
+    if args.input is None:
+        if args.add_key or args.save_user:
+            sys.exit(0)
+        parser.error("the following arguments are required: input")
+
+    # Load saved credentials if not provided via CLI
+    saved_email, saved_password = load_user_credentials()
+    email = args.email or saved_email
+    password = args.password or saved_password
+
+    # Determine API key (priority: --api-key > env var > saved config)
+    api_key = args.api_key or os.environ.get("GEMINI_API_KEY") or load_api_key()
+
     # Set up environment
-    if args.api_key:
-        os.environ["GEMINI_API_KEY"] = args.api_key
+    if api_key:
+        os.environ["GEMINI_API_KEY"] = api_key
 
     output_dir = Path(args.output) if args.output else None
 
     # Run generator
     generator = NotebookLMGenerator(
         input_path=args.input,
-        email=args.email,
-        password=args.password,
+        email=email,
+        password=password,
         headless=args.headless,
         output_dir=output_dir,
-        gemini_api_key=args.api_key
+        gemini_api_key=api_key
     )
 
     success = generator.run()

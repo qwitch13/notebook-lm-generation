@@ -58,6 +58,13 @@
 - [x] Updated README.md with comprehensive documentation
 - [x] Added password quoting advice (single quotes for special chars)
 
+#### Phase 7: Configuration Management (2025-12-07)
+- [x] Added `--add-key KEY` option to save Gemini API key to config file
+- [x] Added `--save-user` option to save Google credentials (email/password)
+- [x] Config file stored at `~/.config/nlmgen/config`
+- [x] Credentials are loaded automatically on future runs
+- [x] Priority: CLI args > env vars > saved config
+
 ### Notes
 - NotebookLM doesn't have an official API, so we'll use Selenium for browser automation
 - Gemini API will be used for content generation tasks
@@ -80,6 +87,7 @@
 - Comprehensive man page
 - Uninstall script with cleanup options
 - Passkey/Touch ID/Face ID/2FA support with 2-minute wait
+- Persistent config storage for API keys and credentials
 
 ### Issues Encountered
 - Initial echo color codes not displaying (fixed with echo -e)
