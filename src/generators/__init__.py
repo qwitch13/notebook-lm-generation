@@ -2,6 +2,7 @@
 
 from .notebooklm import NotebookLMClient
 from .gemini_client import GeminiClient
+from .studio_automator import StudioAutomator, MaterialType, MaterialStatus
 from .handout import HandoutGenerator
 from .cheatsheet import CheatsheetGenerator
 from .mindmap import MindmapGenerator
@@ -15,6 +16,9 @@ from .discussion import DiscussionGenerator
 __all__ = [
     "NotebookLMClient",
     "GeminiClient",
+    "StudioAutomator",
+    "MaterialType",
+    "MaterialStatus",
     "HandoutGenerator",
     "CheatsheetGenerator",
     "MindmapGenerator",
