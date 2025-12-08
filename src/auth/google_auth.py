@@ -54,44 +54,45 @@ class GoogleAuthenticator:
         self.logger = get_logger()
         self.settings = get_settings()
         self.driver: Optional[webdriver.Chrome] = None
+        
+        # Persistent profile directory to keep login saved
+        self.profile_dir = Path.home() / ".nlm_chrome_profile"
+        self.profile_dir.mkdir(exist_ok=True)
 
     def _create_driver(self) -> Optional[webdriver.Chrome]:
         """Create and configure the Chrome WebDriver."""
         self.logger.info("Creating new WebDriver instance...")
         try:
-            if HAS_UNDETECTED and self.settings.use_undetected_chromedriver:
-                self.logger.debug("Using undetected-chromedriver.")
-                options = uc.ChromeOptions()
-                if self.headless:
-                    options.add_argument("--headless=new")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--disable-dev-shm-usage")
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_argument(f"--window-size={self.settings.window_size}")
-                driver = uc.Chrome(options=options, version_main=self.settings.chrome_version)
-            else:
-                self.logger.debug("Using standard Selenium chromedriver.")
-                options = Options()
-                if self.headless:
-                    options.add_argument("--headless=new")
-                options.add_argument("--no-sandbox")
-                options.add_argument("--disable-dev-shm-usage")
-                options.add_argument("--disable-blink-features=AutomationControlled")
-                options.add_argument(f"--window-size={self.settings.window_size}")
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option("useAutomationExtension", False)
-                
-                try:
-                    service = Service(ChromeDriverManager().install())
-                    driver = webdriver.Chrome(service=service, options=options)
-                except Exception as e:
-                    self.logger.error(f"Failed to install/use ChromeDriverManager: {e}")
-                    self.logger.error("Please ensure Chrome is installed or specify chrome_version in settings.")
-                    return None
+            # Use standard Selenium with persistent profile (more stable than undetected-chromedriver)
+            # The persistent profile keeps Google login saved between sessions
+            self.logger.info("Using standard Selenium with persistent Chrome profile.")
+            self.logger.info(f"Profile directory: {self.profile_dir}")
+            
+            options = Options()
+            if self.headless:
+                options.add_argument("--headless=new")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_argument(f"--window-size={self.settings.window_size}")
+            
+            # Use persistent profile to keep login saved
+            options.add_argument(f"--user-data-dir={self.profile_dir}")
+            
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option("useAutomationExtension", False)
+            
+            try:
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=options)
+            except Exception as e:
+                self.logger.error(f"Failed to install/use ChromeDriverManager: {e}")
+                self.logger.error("Please ensure Chrome is installed.")
+                return None
 
-                driver.execute_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-                )
+            driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
 
             driver.set_page_load_timeout(self.settings.page_load_timeout)
             self.logger.info("WebDriver instance created successfully.")
@@ -255,6 +256,32 @@ class GoogleAuthenticator:
             return True
         except Exception as e:
             self.logger.error(f"Failed to navigate to NotebookLM: {e}")
+            self.logger.error(traceback.format_exc())
+            return False
+
+    def open_gemini_in_new_tab(self) -> bool:
+        """Open Gemini in a new browser tab."""
+        self.logger.info("Opening Gemini in new tab...")
+        try:
+            if not self.driver:
+                self.logger.error("No driver available")
+                return False
+            
+            # Execute JavaScript to open new tab
+            self.driver.execute_script(f"window.open('{self.settings.gemini_url}', '_blank');")
+            
+            # Switch to the new tab
+            time.sleep(1)
+            self.driver.switch_to.window(self.driver.window_handles[-1])
+            
+            # Wait for Gemini to load
+            WebDriverWait(self.driver, 30).until(EC.url_contains("gemini.google.com"))
+            
+            self.logger.info("Gemini opened in new tab successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to open Gemini: {e}")
             self.logger.error(traceback.format_exc())
             return False
 

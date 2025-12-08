@@ -48,7 +48,9 @@ class NotebookLMGenerator:
         output_dir: Optional[Path] = None,
         gemini_api_key: Optional[str] = None,
         notebook_url: Optional[str] = None,
-        no_api: bool = False
+        no_api: bool = False,
+        action: str = "full",
+        chat_message: Optional[str] = None
     ):
         self.input_path = Path(input_path) if not input_path.startswith("http") else input_path
         self.email = email
@@ -57,6 +59,8 @@ class NotebookLMGenerator:
         self.settings = get_settings()
         self.notebook_url = notebook_url  # Use existing NotebookLM notebook
         self.no_api = no_api  # Don't use Gemini API, only NotebookLM chat
+        self.action = action  # Single action mode: audio, chat, flashcards, quiz, summary, full
+        self.chat_message = chat_message  # Message for chat action
 
         # Determine output directory
         if output_dir:
@@ -91,7 +95,7 @@ class NotebookLMGenerator:
 
     def run(self) -> bool:
         """
-        Execute the full generation pipeline.
+        Execute the generation pipeline.
 
         Returns:
             True if successful, False otherwise
@@ -100,6 +104,7 @@ class NotebookLMGenerator:
         self.logger.info("NotebookLM Generation Tool")
         self.logger.info(f"Input: {self.input_path}")
         self.logger.info(f"Output: {self.output_dir}")
+        self.logger.info(f"Action: {self.action}")
         self.logger.info("=" * 60)
 
         self.progress.start()
@@ -109,6 +114,11 @@ class NotebookLMGenerator:
             if not self._authenticate():
                 return False
 
+            # If single action mode, run only that action
+            if self.action != "full":
+                return self._run_single_action()
+
+            # Full pipeline mode
             # Step 2: Load and process content
             content = self._load_content()
             if not content:
@@ -140,6 +150,91 @@ class NotebookLMGenerator:
             self.progress.stop()
             self._cleanup()
 
+    def _run_single_action(self) -> bool:
+        """Run a single action on the notebook (audio, chat, flashcards, etc)."""
+        print(f"\n{'=' * 50}")
+        print(f"🎯 RUNNING SINGLE ACTION: {self.action}")
+        print(f"{'=' * 50}\n")
+        self.logger.info(f"Running single action: {self.action}")
+        
+        if not self.notebooklm:
+            self.logger.error("NotebookLM client not initialized")
+            print("❌ NotebookLM client not initialized!")
+            return False
+        
+        print("✅ NotebookLM client is available")
+        
+        # Give user time to see the browser
+        import time
+        print("⏳ Waiting 5 seconds before starting action...")
+        time.sleep(5)
+        
+        try:
+            if self.action == "audio":
+                print("🎵 Starting audio generation...")
+                self.logger.info("Generating audio overview...")
+                result = self.notebooklm.generate_audio_overview()
+                print(f"   Audio result: {result}")
+                if result:
+                    self.logger.info("✅ Audio generation started successfully!")
+                    print("✅ Audio generation started successfully!")
+                else:
+                    self.logger.error("❌ Failed to start audio generation")
+                    print("❌ Failed to start audio generation")
+                return result
+            
+            elif self.action == "chat":
+                print("💬 Starting chat...")
+                if not self.chat_message:
+                    self.logger.error("No message provided for chat action. Use --chat-message")
+                    print("❌ No chat message provided!")
+                    return False
+                self.logger.info(f"Sending chat message: {self.chat_message[:50]}...")
+                print(f"   Sending: {self.chat_message[:50]}...")
+                response = self.notebooklm.send_chat_message(self.chat_message)
+                print(f"   Response received: {bool(response)}")
+                if response:
+                    self.logger.info("✅ Got response from NotebookLM:")
+                    print("\n" + "=" * 60)
+                    print(response)
+                    print("=" * 60 + "\n")
+                    return True
+                else:
+                    self.logger.error("❌ Failed to get response")
+                    print("❌ Failed to get response")
+                    return False
+            
+            elif self.action == "flashcards":
+                self.logger.info("Generating flashcards...")
+                result = self.notebooklm.generate_flashcards()
+                return bool(result)
+            
+            elif self.action == "quiz":
+                self.logger.info("Generating quiz...")
+                result = self.notebooklm.generate_quiz()
+                return bool(result)
+            
+            elif self.action == "summary":
+                self.logger.info("Generating summary...")
+                result = self.notebooklm.generate_summary()
+                if result:
+                    self.logger.info("✅ Summary generated:")
+                    print("\n" + "=" * 60)
+                    print(result)
+                    print("=" * 60 + "\n")
+                    return True
+                return False
+            
+            else:
+                self.logger.error(f"Unknown action: {self.action}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Action failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def _authenticate(self) -> bool:
         """Authenticate with Google."""
         self.progress.set_step(ProcessingStep.AUTHENTICATION, "Logging into Google...")
@@ -163,9 +258,8 @@ class NotebookLMGenerator:
             # Navigate to existing notebook if URL provided
             if self.notebook_url:
                 self.logger.info(f"Using existing NotebookLM notebook: {self.notebook_url}")
-                self.authenticator.get_driver().get(self.notebook_url)
-                import time
-                time.sleep(3)  # Wait for notebook to load
+                # Use the NotebookLMClient's navigate method for proper waiting and setup
+                self.notebooklm.navigate_to_notebook(self.notebook_url)
 
             # Initialize Gemini client (skip if --no-api)
             if self.no_api:
@@ -565,6 +659,18 @@ def main():
     )
 
     parser.add_argument(
+        "--action",
+        choices=["audio", "chat", "flashcards", "quiz", "summary", "full"],
+        default="full",
+        help="Action to perform: audio (generate audio overview), chat (send message), flashcards, quiz, summary, full (default: full pipeline)"
+    )
+
+    parser.add_argument(
+        "--chat-message",
+        help="Message to send when using --action chat"
+    )
+
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Verbose output"
@@ -625,7 +731,9 @@ def main():
         output_dir=output_dir,
         gemini_api_key=api_key if not args.no_api else None,
         notebook_url=args.notebook_url,
-        no_api=args.no_api
+        no_api=args.no_api,
+        action=args.action,
+        chat_message=args.chat_message
     )
 
     success = generator.run()
