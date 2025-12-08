@@ -660,14 +660,51 @@ def main():
 
     parser.add_argument(
         "--action",
-        choices=["audio", "chat", "flashcards", "quiz", "summary", "full"],
+        choices=["audio", "chat", "flashcards", "quiz", "summary", "full", "studio", "download"],
         default="full",
-        help="Action to perform: audio (generate audio overview), chat (send message), flashcards, quiz, summary, full (default: full pipeline)"
+        help="Action: audio, chat, flashcards, quiz, summary, full, studio (generate all materials), download"
     )
 
     parser.add_argument(
         "--chat-message",
         help="Message to send when using --action chat"
+    )
+
+    # Studio/Batch options
+    parser.add_argument(
+        "--batch",
+        metavar="FOLDER",
+        help="Batch process all PDFs in folder (creates notebook per file)"
+    )
+
+    parser.add_argument(
+        "--materials", "-m",
+        nargs="+",
+        choices=["audio", "video", "mindmap", "quiz", "flashcards", "infographic"],
+        help="Materials to generate in studio mode (default: all)"
+    )
+
+    parser.add_argument(
+        "--auto-name", "-a",
+        action="store_true",
+        help="Auto-name notebooks from filenames (no prompts)"
+    )
+
+    parser.add_argument(
+        "--name",
+        help="Custom notebook name"
+    )
+
+    parser.add_argument(
+        "--list-sources",
+        action="store_true",
+        help="List sources in notebook and exit"
+    )
+
+    parser.add_argument(
+        "--list-materials",
+        action="store_true",
+        help="List generated materials in notebook"
     )
 
     parser.add_argument(
@@ -703,10 +740,11 @@ def main():
         print(f"Gemini API key saved to {get_config_path()}")
 
     # Exit early if only saving config (no input provided)
-    if args.input is None:
+    if args.input is None and not args.batch:
         if args.add_key or args.save_user:
             sys.exit(0)
-        parser.error("the following arguments are required: input")
+        if not args.notebook_url:
+            parser.error("the following arguments are required: input (or --batch or --notebook-url)")
 
     # Load saved credentials if not provided via CLI
     saved_email, saved_password = load_user_credentials()
@@ -722,6 +760,125 @@ def main():
 
     output_dir = Path(args.output) if args.output else None
 
+    # =========================================================================
+    # BATCH/STUDIO MODE
+    # =========================================================================
+    if args.batch or args.action in ["studio", "download"] or args.list_sources or args.list_materials:
+        from .generators.studio_automator import StudioAutomator, MaterialType
+        from .auth.google_auth import GoogleAuthenticator
+        from .generators.notebooklm import NotebookLMClient
+        
+        # Parse materials
+        materials = None
+        if args.materials:
+            material_map = {
+                "audio": MaterialType.AUDIO,
+                "video": MaterialType.VIDEO,
+                "mindmap": MaterialType.MINDMAP,
+                "quiz": MaterialType.QUIZ,
+                "flashcards": MaterialType.FLASHCARDS,
+                "infographic": MaterialType.INFOGRAPHIC,
+            }
+            materials = [material_map[m] for m in args.materials]
+        
+        # Initialize browser
+        print("🌐 Initializing browser...")
+        auth = GoogleAuthenticator(headless=args.headless)
+        driver = auth.get_driver()
+        
+        if not driver:
+            print("❌ Failed to initialize browser")
+            sys.exit(1)
+        
+        try:
+            studio = StudioAutomator(driver)
+            
+            # BATCH MODE
+            if args.batch:
+                from pathlib import Path as P
+                folder = P(args.batch)
+                files = sorted(folder.glob("*.pdf"))
+                
+                if not files:
+                    print(f"❌ No PDFs found in {args.batch}")
+                    sys.exit(1)
+                
+                print(f"📁 Found {len(files)} PDFs")
+                
+                for i, f in enumerate(files, 1):
+                    print(f"\n[{i}/{len(files)}] {f.name}")
+                    
+                    # Get notebook name
+                    default_name = f.stem.replace('_', ' ').replace('-', ' ').title()
+                    if args.name:
+                        nb_name = args.name
+                    elif args.auto_name:
+                        nb_name = default_name
+                    else:
+                        print(f"📓 Notebook name (Enter for '{default_name}'): ", end="")
+                        user_input = input().strip()
+                        nb_name = user_input if user_input else default_name
+                    
+                    # Create notebook
+                    nb_url = studio.create_new_notebook(nb_name)
+                    if nb_url:
+                        print(f"   ✅ Created: {nb_url}")
+                        studio.add_source_file(str(f))
+                        import time
+                        time.sleep(10)
+                        studio.process_all_sources(materials=materials)
+                    else:
+                        print(f"   ❌ Failed")
+                
+                print("\n✅ Batch complete!")
+                sys.exit(0)
+            
+            # EXISTING NOTEBOOK MODE
+            if args.notebook_url:
+                client = NotebookLMClient(auth)
+                client.navigate_to_notebook(args.notebook_url)
+                import time
+                time.sleep(3)
+            
+            # List sources
+            if args.list_sources:
+                sources = studio.list_sources()
+                print("\n📋 Sources:")
+                for s in sources:
+                    print(f"  • {s.name}")
+                sys.exit(0)
+            
+            # List materials
+            if args.list_materials:
+                mats = studio.list_generated_materials()
+                print("\n📋 Materials:")
+                for m in mats:
+                    status = "⏳" if m['status'] == 'generating' else "✅"
+                    print(f"  {status} [{m['type']}] {m['name'][:50]}")
+                sys.exit(0)
+            
+            # Download
+            if args.action == "download":
+                results = studio.download_all_materials()
+                print(f"\n📥 Downloaded: {results['downloaded']}, Failed: {results['failed']}")
+                sys.exit(0)
+            
+            # Studio generate
+            if args.action == "studio":
+                studio.process_all_sources(materials=materials)
+                print(studio.get_summary_report())
+                sys.exit(0)
+                
+        except KeyboardInterrupt:
+            print("\n⚠️ Cancelled")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            sys.exit(1)
+
+    # =========================================================================
+    # STANDARD MODE (original behavior)
+    # =========================================================================
     # Run generator
     generator = NotebookLMGenerator(
         input_path=args.input,

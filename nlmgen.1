@@ -159,6 +159,24 @@ Audio/video generation can take several minutes per topic.
 Passkey or 2FA verification must be completed manually in the browser.
 .IP \(bu 2
 The browser remains open after completion with Gemini loaded.
+.IP \(bu 2
+StudioAutomator supports batch generation of 6 material types per source.
+.SH STUDIO AUTOMATION
+The StudioAutomator class provides programmatic access to NotebookLM Studio features:
+.IP \(bu 2
+Audio Summary \- generates audio overview with English language
+.IP \(bu 2
+Video Overview \- generates video summary with English language
+.IP \(bu 2
+Mindmap \- generates visual mindmap (immediate)
+.IP \(bu 2
+Quiz \- generates interactive quiz (immediate)
+.IP \(bu 2
+Flashcards \- generates Karteikarten (immediate)
+.IP \(bu 2
+Infographic \- generates visual infographic with English language
+.PP
+Use \fBprocess_all_sources()\fR to generate all materials for all sources, or specify a subset with the \fBmaterials\fR parameter.
 .SH BUGS
 Report bugs at: https://github.com/qwitch13/notebook-lm-generation/issues
 .SH AUTHOR

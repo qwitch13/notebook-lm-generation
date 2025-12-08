@@ -26,6 +26,7 @@ This tool takes educational content (PDF, TXT, or website) and automatically gen
 - **Opens Gemini** at the end for additional interaction
 - **System-wide `nlmgen` command** - run from anywhere
 - **Man page** - comprehensive documentation via `man nlmgen`
+- **StudioAutomator** - Full NotebookLM Studio automation for batch material generation
 
 ## Installation
 
@@ -154,6 +155,36 @@ This is especially useful when:
 - You've hit Gemini API rate limits
 - You want to use NotebookLM's unlimited generation capabilities
 - You have a pre-existing notebook with sources already added
+
+### Studio Automation (Advanced)
+
+The tool includes `StudioAutomator` for batch generation of NotebookLM Studio materials:
+
+```python
+from src.generators import StudioAutomator, MaterialType
+
+# Initialize with Selenium driver
+automator = StudioAutomator(driver)
+
+# Generate all 6 material types for all sources
+results = automator.process_all_sources()
+
+# Or generate specific materials
+results = automator.process_all_sources(
+    materials=[MaterialType.AUDIO, MaterialType.VIDEO, MaterialType.MINDMAP]
+)
+
+# Download completed materials
+automator.download_all_materials()
+```
+
+Supported material types:
+- `AUDIO` - Audio summary (English)
+- `VIDEO` - Video overview (English)
+- `MINDMAP` - Visual mindmap
+- `QUIZ` - Interactive quiz
+- `FLASHCARDS` - Karteikarten/Flashcards
+- `INFOGRAPHIC` - Visual infographic (English)
 
 ### Saving Credentials
 
@@ -296,6 +327,10 @@ notebook-lm-generation/
 │   ├── auth/                # Authentication
 │   ├── processors/          # Content processing
 │   ├── generators/          # Material generation
+│   │   ├── notebooklm.py    # NotebookLM client
+│   │   ├── studio_automator.py  # Studio automation (NEW)
+│   │   ├── gemini_client.py # Gemini API client
+│   │   └── ...              # Other generators
 │   ├── utils/               # Utilities
 │   └── config/              # Configuration
 ├── tests/                   # Test files
