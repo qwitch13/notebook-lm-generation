@@ -206,6 +206,61 @@ class StudioAutomator:
             
         return None
 
+    def _dismiss_welcome_overlay(self):
+        """Dismiss any welcome/onboarding overlay that appears on new notebooks."""
+        self.logger.debug("Checking for welcome overlay...")
+        try:
+            # Wait a moment for any overlay to appear
+            self._wait(2)
+            
+            # Common dismiss button texts (German and English)
+            dismiss_texts = [
+                "Verstanden", "Got it", "Schließen", "Close", 
+                "OK", "Weiter", "Continue", "Überspringen", "Skip",
+                "Fertig", "Done", "Los geht's", "Get started"
+            ]
+            
+            for text in dismiss_texts:
+                try:
+                    btn = self._find_by_text(text)
+                    if btn and btn.is_displayed():
+                        self._click_safe(btn)
+                        self.logger.info(f"Dismissed overlay with '{text}' button")
+                        self._wait(1)
+                        return
+                except:
+                    continue
+            
+            # Try clicking any visible button in a dialog/overlay
+            try:
+                dialogs = self.driver.find_elements(
+                    By.CSS_SELECTOR, 
+                    "[role='dialog'], .mdc-dialog, .mat-dialog-container, .overlay, .modal"
+                )
+                for dialog in dialogs:
+                    if dialog.is_displayed():
+                        buttons = dialog.find_elements(By.TAG_NAME, "button")
+                        for btn in buttons:
+                            if btn.is_displayed():
+                                self._click_safe(btn)
+                                self.logger.info("Dismissed dialog by clicking button")
+                                self._wait(1)
+                                return
+            except:
+                pass
+            
+            # Try pressing Escape key
+            try:
+                from selenium.webdriver.common.action_chains import ActionChains
+                ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                self._wait(0.5)
+            except:
+                pass
+                
+            self.logger.debug("No overlay found to dismiss")
+        except Exception as e:
+            self.logger.debug(f"Dismiss overlay check failed: {e}")
+
     # =========================================================================
     # SOURCE SELECTION
     # =========================================================================
@@ -1180,15 +1235,71 @@ class StudioAutomator:
             self.driver.get("https://notebooklm.google.com/")
             self._wait(3)
             
+            # Check if we're redirected to login
+            max_wait = 120  # 2 minutes
+            waited = 0
+            login_warning_shown = False
+            
+            while waited < max_wait:
+                current_url = self.driver.current_url.lower()
+                
+                # Check if on login page
+                if "accounts.google.com" in current_url or "signin" in current_url:
+                    if not login_warning_shown:
+                        self.logger.warning("=" * 50)
+                        self.logger.warning("LOGIN REQUIRED")
+                        self.logger.warning("Please log into Google in the browser window.")
+                        self.logger.warning(f"Waiting up to {max_wait} seconds...")
+                        self.logger.warning("=" * 50)
+                        login_warning_shown = True
+                    self._wait(3)
+                    waited += 3
+                    continue
+                
+                # Check if we're on NotebookLM
+                if "notebooklm.google.com" in current_url:
+                    # Verify page is actually loaded
+                    try:
+                        page_source = self.driver.page_source.lower()
+                        if "notebook" in page_source or "create" in page_source or "erstellen" in page_source:
+                            break  # Page loaded, proceed
+                    except:
+                        pass
+                    self._wait(2)
+                    waited += 2
+                    continue
+                
+                self._wait(2)
+                waited += 2
+            
+            if waited >= max_wait:
+                self.logger.error("Timed out waiting for NotebookLM to load")
+                return None
+            
+            self._wait(2)
+            
             # Find and click "New notebook" / "Notebook erstellen" button
             create_btn = self._find_button("Notebook erstellen", ["New notebook", "Create", "erstellen"])
             
             if not create_btn:
                 # Try finding by icon
-                create_btn = self.driver.find_element(
-                    By.XPATH,
-                    "//button[.//mat-icon[text()='add'] or contains(@class, 'create')]"
-                )
+                try:
+                    create_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[.//mat-icon[text()='add'] or contains(@class, 'create')]"
+                    )
+                except:
+                    pass
+            
+            if not create_btn:
+                # Try FAB button
+                try:
+                    create_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[contains(@class, 'fab') or contains(@class, 'mdc-fab')]"
+                    )
+                except:
+                    pass
             
             if create_btn:
                 self._click_safe(create_btn)
@@ -1202,13 +1313,16 @@ class StudioAutomator:
                 notebook_url = self.driver.current_url
                 self.logger.info(f"Created notebook: {notebook_url}")
                 
+                # Dismiss any welcome/onboarding overlay
+                self._dismiss_welcome_overlay()
+                
                 # Set name if provided
                 if name:
                     self._set_notebook_name(name)
                 
                 return notebook_url
             else:
-                self.logger.error("Could not find create notebook button")
+                self.logger.error("Could not find create notebook button - check if logged in")
                 
         except Exception as e:
             self.logger.error(f"Notebook creation failed: {e}")
@@ -1350,49 +1464,153 @@ class StudioAutomator:
         self.logger.info(f"Adding file source: {file_path}")
         
         try:
-            # Click "Quelle hinzufügen" / "Add source" button
-            add_btn = self._find_button("Quelle hinzufügen", ["Add source", "hinzufügen"])
+            # Dismiss any overlays first
+            self._dismiss_welcome_overlay()
+            self._wait(1)
             
+            # Step 1: Click "Quellen hinzufügen" / "Add sources" button
+            # Look for button with aria-label='Quelle hinzufügen' or text containing 'Quellen hinzufügen'
+            add_btn = None
+            
+            # Try by aria-label first (most reliable)
+            try:
+                add_btn = self.driver.find_element(
+                    By.XPATH,
+                    "//button[@aria-label='Quelle hinzufügen']"
+                )
+            except:
+                pass
+            
+            # Try by text containing "Quellen hinzufügen"
             if not add_btn:
-                sources_header = self._find_by_text("Quellen")
-                if sources_header:
-                    self._click_safe(sources_header)
-                    self._wait(1)
-                add_btn = self._find_button("hinzufügen", ["Add"])
+                try:
+                    add_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[contains(., 'Quellen hinzufügen')]"
+                    )
+                except:
+                    pass
             
+            # Try English version
             if not add_btn:
-                self.logger.error("Could not find Add source button")
-                return False
+                try:
+                    add_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[contains(., 'Add source') or @aria-label='Add source']"
+                    )
+                except:
+                    pass
             
-            self._click_safe(add_btn)
-            self._wait(2)
+            if add_btn and add_btn.is_displayed():
+                self.logger.debug("Found 'Add sources' button, clicking...")
+                self._click_safe(add_btn)
+                self._wait(2)
+            else:
+                self.logger.debug("Add sources button not found or not visible")
             
-            # Find file input element
+            # Step 2: Now we should be in the upload dialog
+            # Click "Quelle hochladen" / "Upload source" button
+            upload_btn = None
+            
+            # Try by text "Quelle hochladen"
+            try:
+                upload_btn = self.driver.find_element(
+                    By.XPATH,
+                    "//button[contains(., 'Quelle hochladen')]"
+                )
+            except:
+                pass
+            
+            # Try by text "Quellen hochladen"
+            if not upload_btn:
+                try:
+                    upload_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[contains(., 'Quellen hochladen')]"
+                    )
+                except:
+                    pass
+            
+            # Try the upload icon button
+            if not upload_btn:
+                try:
+                    upload_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[@aria-label='Öffnet das kleine Fenster' or .//mat-icon[text()='upload']]"
+                    )
+                except:
+                    pass
+            
+            # Try English
+            if not upload_btn:
+                try:
+                    upload_btn = self.driver.find_element(
+                        By.XPATH,
+                        "//button[contains(., 'Upload source') or contains(., 'Upload file')]"
+                    )
+                except:
+                    pass
+            
+            if upload_btn and upload_btn.is_displayed():
+                self.logger.debug("Found 'Upload source' button, clicking...")
+                self._click_safe(upload_btn)
+                self._wait(2)
+            
+            # Step 3: Try to find file input (may now exist after clicking upload)
             file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
             
             if file_inputs:
-                # Send file path to the hidden file input
+                self.logger.debug(f"Found {len(file_inputs)} file input(s)")
+                # Send file path to the file input
                 file_inputs[0].send_keys(file_path)
-                self._wait(5)  # Wait for upload
-                self.logger.info("File source added successfully")
-                return True
-            else:
-                # Try clicking upload button first
-                upload_btn = self._find_by_text("Hochladen")
-                if not upload_btn:
-                    upload_btn = self._find_by_text("Upload")
+                self._wait(5)  # Wait for upload to start
                 
-                if upload_btn:
-                    self._click_safe(upload_btn)
+                # Wait for source to appear (up to 30 seconds)
+                self.logger.info("Waiting for file to upload...")
+                for _ in range(15):
+                    sources = self.driver.find_elements(
+                        By.CSS_SELECTOR, 
+                        "input[type='checkbox'][aria-label]"
+                    )
+                    # Also check for source count change
+                    try:
+                        source_text = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Quelle')]").text
+                        if "1 Quelle" in source_text:
+                            self.logger.info("File source added successfully")
+                            return True
+                    except:
+                        pass
+                    
+                    if len(sources) > 0:
+                        self.logger.info("File source added successfully")
+                        return True
+                    self._wait(2)
+                
+                self.logger.info("File upload initiated (may still be processing)")
+                return True
+            
+            # Step 4: If no file input, try clicking the drag-drop area
+            self.logger.debug("No file input found, looking for drag-drop area...")
+            
+            # Look for the upload area by text
+            try:
+                drop_area = self.driver.find_element(
+                    By.XPATH,
+                    "//*[contains(text(), 'Drag-and-drop') or contains(text(), 'Datei auswählen')]"
+                )
+                if drop_area:
+                    self._click_safe(drop_area)
                     self._wait(1)
                     
-                    # Try again to find file input
+                    # Try file input again
                     file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                     if file_inputs:
                         file_inputs[0].send_keys(file_path)
                         self._wait(5)
-                        self.logger.info("File source added successfully")
+                        self.logger.info("File source added via drop area")
                         return True
+            except:
+                pass
             
             self.logger.error("Could not find file input element")
             return False

@@ -502,15 +502,70 @@ class NotebookLMClient:
                 return False
 
     def navigate_to_notebooklm(self) -> bool:
-        """Navigate to NotebookLM homepage."""
+        """Navigate to NotebookLM homepage and ensure logged in."""
         if not self.is_driver_alive():
             return False
         try:
             self.driver.get(self.settings.notebooklm_url)
-            WebDriverWait(self.driver, 30).until(EC.url_contains("notebooklm.google.com"))
-            time.sleep(2)  # Let page fully load
-            self.logger.info(f"Navigated to NotebookLM: {self.driver.current_url}")
-            return True
+            time.sleep(3)  # Initial page load
+            
+            # Check if we're redirected to login
+            max_wait = 120  # 2 minutes max wait for login
+            waited = 0
+            login_warning_shown = False
+            
+            while waited < max_wait:
+                current_url = self.driver.current_url.lower()
+                
+                # Check if we're on login/accounts page
+                if "accounts.google.com" in current_url or "signin" in current_url:
+                    if not login_warning_shown:
+                        self.logger.warning("=" * 50)
+                        self.logger.warning("LOGIN REQUIRED")
+                        self.logger.warning("Please log into your Google account in the browser window.")
+                        self.logger.warning(f"Waiting up to {max_wait} seconds...")
+                        self.logger.warning("=" * 50)
+                        login_warning_shown = True
+                    time.sleep(3)
+                    waited += 3
+                    continue
+                
+                # Check if we're on NotebookLM homepage (not just any notebooklm page)
+                if "notebooklm.google.com" in current_url:
+                    # Wait for page to fully load
+                    time.sleep(3)
+                    
+                    # Verify we can find some expected element (the page loaded properly)
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            lambda d: d.execute_script("return document.readyState") == "complete"
+                        )
+                    except:
+                        pass
+                    
+                    # Look for any sign we're on a proper NotebookLM page
+                    # Either the create button or existing notebooks
+                    try:
+                        # Check for create button or any notebook-related content
+                        page_source = self.driver.page_source.lower()
+                        if "notebook" in page_source or "create" in page_source or "erstellen" in page_source:
+                            self.logger.info(f"Successfully navigated to NotebookLM: {self.driver.current_url}")
+                            self._dismiss_overlays()
+                            return True
+                    except:
+                        pass
+                    
+                    time.sleep(2)
+                    waited += 2
+                    continue
+                
+                # Unknown state, wait a bit
+                time.sleep(2)
+                waited += 2
+            
+            self.logger.error(f"Failed to reach NotebookLM after {max_wait}s. Current URL: {self.driver.current_url}")
+            return False
+            
         except Exception as e:
             self.logger.error(f"Navigation failed: {e}")
             return False
@@ -580,29 +635,68 @@ class NotebookLMClient:
 
     def create_notebook(self, name: str) -> NotebookProject:
         """Create a new notebook."""
-        self.logger.info(f"Creating notebook: {name}")
+        self.logger.info(f"Creating new notebook: {name}")
         
         if not self.is_driver_alive():
             self.driver = self.auth.get_driver(force_recreate=True)
         
         try:
-            if "notebooklm.google.com" not in self.driver.current_url:
-                self.navigate_to_notebooklm()
+            # Always navigate to NotebookLM first (this now handles login check)
+            if not self.navigate_to_notebooklm():
+                raise Exception("Failed to navigate to NotebookLM - login may be required")
             
-            time.sleep(2)
+            time.sleep(3)  # Extra wait for page to stabilize
             
-            # Find and click create button
-            create_btn = self._find_element_multi_strategy("new_notebook_btn", timeout=15)
-            if create_btn:
-                self._click_element_safe(create_btn)
-                time.sleep(3)
+            # Dismiss any overlays first
+            self._dismiss_overlays()
+            time.sleep(1)
+            
+            # Find and click create button - try multiple approaches
+            create_btn = None
+            
+            # Try finding by + icon (most reliable for German UI)
+            try:
+                create_btn = self.driver.find_element(
+                    By.XPATH, 
+                    "//button[.//mat-icon[text()='add'] or contains(@class, 'create')]"
+                )
+            except:
+                pass
+            
+            if not create_btn:
+                create_btn = self._find_element_multi_strategy("new_notebook_btn", timeout=15)
+            
+            if not create_btn:
+                # Try finding any FAB (floating action button) with + icon
+                try:
+                    create_btn = self.driver.find_element(
+                        By.XPATH, 
+                        "//button[contains(@class, 'fab') or contains(@class, 'mdc-fab')]"
+                    )
+                except:
+                    pass
+            
+            if not create_btn:
+                # Debug: list all buttons to help diagnose
+                self.logger.warning("Could not find create button. Dumping page info...")
+                self._debug_dump_page_info()
+                raise Exception("Create notebook button not found - check if logged in properly")
+            
+            self._click_element_safe(create_btn)
+            time.sleep(3)
+            
+            # Wait for new notebook page to load
+            WebDriverWait(self.driver, 15).until(
+                lambda d: "notebook" in d.current_url.lower()
+            )
             
             self.current_notebook = NotebookProject(name=name, url=self.driver.current_url)
+            self.logger.info(f"Created notebook: {self.driver.current_url}")
             return self.current_notebook
             
         except Exception as e:
-            self.logger.error(f"Failed to create notebook: {e}")
-            return NotebookProject(name=name, url=self.driver.current_url if self.driver else None)
+            self.logger.error(f"Notebook creation failed: {e}")
+            raise
 
     def generate_audio_overview(self) -> bool:
         """Generate audio overview using NotebookLM's Audio Overview feature."""
@@ -965,6 +1059,252 @@ class NotebookLMClient:
             "Format: Question, A) B) C) D) options, and mark the correct answer."
         )
 
+    def upload_file_source(self, file_path: str, timeout: int = 60) -> bool:
+        """Upload a file as a source to the current notebook.
+        
+        This method bypasses the native file dialog by sending the file path
+        directly to the hidden <input type='file'> element.
+        
+        Args:
+            file_path: Absolute path to the file to upload
+            timeout: Maximum seconds to wait for upload completion
+            
+        Returns:
+            True if upload succeeded, False otherwise
+        """
+        from pathlib import Path
+        import os
+        
+        self.logger.info(f"Uploading file: {file_path}")
+        print(f"📁 upload_file_source called with: {file_path}")
+        
+        if not self.is_driver_alive():
+            print("❌ Driver not alive!")
+            return False
+        
+        # Validate file exists and get absolute path
+        file_path = os.path.abspath(file_path)
+        if not os.path.exists(file_path):
+            self.logger.error(f"File not found: {file_path}")
+            print(f"❌ File not found: {file_path}")
+            return False
+        
+        print(f"   ✅ File exists: {file_path}")
+        
+        try:
+            # Step 1: Click "Add source" button to open the source dialog
+            print("1️⃣ Looking for Add Source button...")
+            add_btn = self._find_element_multi_strategy("add_source_btn", timeout=10)
+            if not add_btn:
+                add_btn = self._find_clickable_by_text("Quelle hinzufügen", timeout=5)
+            if not add_btn:
+                add_btn = self._find_clickable_by_text("Add source", timeout=5)
+            
+            if add_btn:
+                self._click_element_safe(add_btn)
+                print("   ✅ Clicked Add Source button")
+                time.sleep(2)
+            else:
+                self.logger.error("Could not find Add Source button")
+                print("   ❌ Could not find Add Source button")
+                return False
+            
+            # Step 2: Click "Upload from computer" option
+            print("2️⃣ Looking for Upload button...")
+            upload_btn = None
+            
+            # Try German UI first
+            upload_btn = self._find_clickable_by_text("Computer hochladen", timeout=3)
+            if not upload_btn:
+                upload_btn = self._find_clickable_by_text("von meinem Computer", timeout=3)
+            if not upload_btn:
+                # Try by aria-label
+                try:
+                    upload_btn = self.driver.find_element(
+                        By.XPATH, 
+                        "//button[contains(@aria-label, 'Computer') or contains(@aria-label, 'hochladen')]"
+                    )
+                except:
+                    pass
+            if not upload_btn:
+                # English fallback
+                upload_btn = self._find_clickable_by_text("Upload", timeout=3)
+            if not upload_btn:
+                upload_btn = self._find_clickable_by_text("from computer", timeout=3)
+            
+            if upload_btn:
+                self._click_element_safe(upload_btn)
+                print("   ✅ Clicked Upload button")
+                time.sleep(2)
+            else:
+                print("   ⚠️ Upload button not found, looking for file input directly...")
+            
+            # Step 3: Find the hidden file input element - THIS IS THE KEY!
+            # We send the file path directly to the <input type="file"> element
+            # instead of clicking the button that opens the native dialog
+            print("3️⃣ Looking for file input element...")
+            file_input = None
+            
+            # Strategies to find the file input
+            file_input_selectors = [
+                "input[type='file']",
+                "input[accept*='pdf']",
+                "input[accept*='document']",
+                ".dropzone input[type='file']",
+                "[class*='upload'] input[type='file']",
+                "[class*='file-input']",
+            ]
+            
+            for selector in file_input_selectors:
+                try:
+                    inputs = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for inp in inputs:
+                        # File inputs are often hidden, but we can still send_keys to them
+                        if inp.get_attribute("type") == "file":
+                            file_input = inp
+                            print(f"   ✅ Found file input with: {selector}")
+                            break
+                    if file_input:
+                        break
+                except Exception as e:
+                    continue
+            
+            # XPath fallback
+            if not file_input:
+                try:
+                    file_input = self.driver.find_element(
+                        By.XPATH, "//input[@type='file']"
+                    )
+                    print("   ✅ Found file input via XPath")
+                except:
+                    pass
+            
+            if not file_input:
+                self.logger.error("Could not find file input element")
+                print("   ❌ Could not find file input element!")
+                print("   ℹ️ Attempting manual upload fallback...")
+                return self._manual_upload_fallback(file_path, timeout)
+            
+            # Step 4: Make the input visible if needed (some inputs are display:none)
+            try:
+                self.driver.execute_script(
+                    "arguments[0].style.display = 'block'; "
+                    "arguments[0].style.visibility = 'visible'; "
+                    "arguments[0].style.opacity = '1';",
+                    file_input
+                )
+                print("   Made file input visible")
+            except:
+                pass
+            
+            # Step 5: Send the file path directly to the input
+            print(f"4️⃣ Sending file path to input: {file_path}")
+            try:
+                file_input.send_keys(file_path)
+                print("   ✅ File path sent to input element")
+            except Exception as e:
+                self.logger.error(f"Failed to send file path: {e}")
+                print(f"   ❌ Failed to send file path: {e}")
+                return self._manual_upload_fallback(file_path, timeout)
+            
+            # Step 6: Wait for upload to complete
+            print("5️⃣ Waiting for upload to complete...")
+            time.sleep(3)  # Initial wait for upload to start
+            
+            # Look for success indicators
+            upload_complete = False
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                # Check for success indicators
+                try:
+                    # Look for the source appearing in the list
+                    sources = self.get_sources_count()
+                    if sources > 0:
+                        upload_complete = True
+                        print(f"   ✅ Upload complete! Found {sources} source(s)")
+                        break
+                    
+                    # Look for loading/progress indicators disappearing
+                    loading = self.driver.find_elements(
+                        By.XPATH, 
+                        "//*[contains(@class, 'loading') or contains(@class, 'progress') or contains(@class, 'spinner')]"
+                    )
+                    visible_loading = [l for l in loading if l.is_displayed()]
+                    
+                    if not visible_loading:
+                        # No loading indicators, check if source appeared
+                        time.sleep(2)
+                        sources = self.get_sources_count()
+                        if sources > 0:
+                            upload_complete = True
+                            print(f"   ✅ Upload complete! Found {sources} source(s)")
+                            break
+                except:
+                    pass
+                
+                time.sleep(2)
+                elapsed = int(time.time() - start_time)
+                print(f"   ⏳ Waiting... ({elapsed}s / {timeout}s)")
+            
+            if upload_complete:
+                self.logger.info("File uploaded successfully")
+                # Dismiss any dialogs
+                self._dismiss_overlays()
+                return True
+            else:
+                self.logger.warning("Upload may not have completed - checking sources")
+                sources = self.get_sources_count()
+                if sources > 0:
+                    print(f"   ✅ Found {sources} source(s) - upload likely succeeded")
+                    return True
+                print("   ❌ Upload timeout - no sources found")
+                return False
+            
+        except Exception as e:
+            self.logger.error(f"File upload failed: {e}")
+            print(f"   ❌ Exception during upload: {e}")
+            traceback.print_exc()
+            return self._manual_upload_fallback(file_path, timeout)
+
+    def _manual_upload_fallback(self, file_path: str, timeout: int = 120) -> bool:
+        """Fallback: prompt user to manually upload the file.
+        
+        Used when automated upload fails due to UI changes or restrictions.
+        """
+        self.logger.warning("Automated upload failed - requesting manual upload")
+        print("\n" + "=" * 60)
+        print("⚠️  MANUAL UPLOAD REQUIRED")
+        print("=" * 60)
+        print(f"\nPlease manually upload the following file:")
+        print(f"📄 {file_path}")
+        print(f"\nSteps:")
+        print("1. Click 'Add source' in the NotebookLM window")
+        print("2. Select 'Upload from computer'")
+        print("3. Navigate to and select the file")
+        print("4. Wait for upload to complete")
+        print(f"\nWaiting up to {timeout} seconds for upload...")
+        print("=" * 60 + "\n")
+        
+        # Wait and check for sources periodically
+        start_time = time.time()
+        initial_sources = self.get_sources_count()
+        
+        while time.time() - start_time < timeout:
+            current_sources = self.get_sources_count()
+            if current_sources > initial_sources:
+                print(f"\n✅ Source detected! ({current_sources} sources now)")
+                self.logger.info("Manual upload detected - source count increased")
+                return True
+            
+            time.sleep(5)
+            elapsed = int(time.time() - start_time)
+            remaining = timeout - elapsed
+            print(f"   Checking for new sources... ({remaining}s remaining)")
+        
+        print("\n❌ Manual upload timeout - no new sources detected")
+        return False
+
     def add_text_source(self, text: str, title: str = "Source") -> bool:
         """Add text content as a source to the current notebook."""
         self.logger.info(f"Adding text source: {title}")
@@ -1018,15 +1358,59 @@ class NotebookLMClient:
     def get_sources_count(self) -> int:
         """Get the current number of sources in the notebook."""
         try:
-            # Look for sources count in the UI
-            elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'source')]")
-            for elem in elements:
-                text = elem.text
-                match = re.search(r'(\d+)\s*source', text, re.IGNORECASE)
-                if match:
-                    return int(match.group(1))
+            # Method 1: Look for source count text in UI (English and German)
+            patterns = [
+                r'(\d+)\s*source',      # English: "3 sources"
+                r'(\d+)\s*Quelle',       # German: "3 Quellen"
+                r'Quelle.*?(\d+)',       # German: "Quellen (3)"
+            ]
+            
+            for pattern in patterns:
+                elements = self.driver.find_elements(
+                    By.XPATH, 
+                    "//*[contains(text(), 'source') or contains(text(), 'Source') or "
+                    "contains(text(), 'Quelle') or contains(text(), 'quelle')]"
+                )
+                for elem in elements:
+                    text = elem.text
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        return int(match.group(1))
+            
+            # Method 2: Count actual source items in the sources panel
+            # These are typically list items or cards in the sources section
+            source_selectors = [
+                "source-item",           # Custom element
+                "[class*='source-item']",
+                "[class*='source-card']",
+                ".sources-panel [class*='item']",
+                ".source-list > *",
+            ]
+            
+            for selector in source_selectors:
+                try:
+                    items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    visible_items = [i for i in items if i.is_displayed()]
+                    if visible_items:
+                        return len(visible_items)
+                except:
+                    continue
+            
+            # Method 3: Check for checkboxes in sources panel (each source has one)
+            try:
+                checkboxes = self.driver.find_elements(
+                    By.XPATH,
+                    "//mat-checkbox[ancestor::*[contains(@class, 'source')]]"
+                )
+                visible = [c for c in checkboxes if c.is_displayed()]
+                if visible:
+                    return len(visible)
+            except:
+                pass
+            
             return 0
-        except:
+        except Exception as e:
+            self.logger.debug(f"get_sources_count error: {e}")
             return 0
 
     def get_notebook_title(self) -> Optional[str]:

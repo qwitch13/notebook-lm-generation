@@ -214,6 +214,22 @@ class NotebookLMGenerator:
                 result = self.notebooklm.generate_quiz()
                 return bool(result)
             
+            elif self.action == "upload":
+                print("📁 Starting file upload...")
+                if not isinstance(self.input_path, Path) or not self.input_path.exists():
+                    self.logger.error("No valid file provided for upload action")
+                    print(f"❌ No valid file: {self.input_path}")
+                    return False
+                self.logger.info(f"Uploading file: {self.input_path}")
+                result = self.notebooklm.upload_file_source(str(self.input_path))
+                if result:
+                    self.logger.info("✅ File uploaded successfully!")
+                    print("✅ File uploaded successfully!")
+                else:
+                    self.logger.error("❌ File upload failed")
+                    print("❌ File upload failed")
+                return result
+            
             elif self.action == "summary":
                 self.logger.info("Generating summary...")
                 result = self.notebooklm.generate_summary()
@@ -660,9 +676,9 @@ def main():
 
     parser.add_argument(
         "--action",
-        choices=["audio", "chat", "flashcards", "quiz", "summary", "full", "studio", "download"],
+        choices=["audio", "chat", "flashcards", "quiz", "summary", "upload", "full", "studio", "download"],
         default="full",
-        help="Action: audio, chat, flashcards, quiz, summary, full, studio (generate all materials), download"
+        help="Action: audio, chat, flashcards, quiz, summary, upload (file to notebook), full, studio, download"
     )
 
     parser.add_argument(
